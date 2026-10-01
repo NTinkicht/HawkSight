@@ -74,7 +74,7 @@ class DetectionModel:
     def __init__(self, model_path: Union[str, Path] = "yolov8n.pt",
                  conf: float = 0.4):
         self._model_path = str(model_path)
-        self._conf       = conf
+        self.conf        = conf    # setter clamps to 0.05–0.95
         self._model      = None
         self._custom     = False   # True when a purpose-trained model is loaded
 

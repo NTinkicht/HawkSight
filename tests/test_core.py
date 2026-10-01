@@ -4,7 +4,9 @@ import unittest
 
 import numpy as np
 
-from src.core import DetectionResult, FrameProcessor, SystemController
+from src.core import (
+    DetectionModel, DetectionResult, FrameProcessor, SystemController,
+)
 
 FRAME = np.zeros((20, 20, 3), dtype=np.uint8)
 HIT   = DetectionResult(boxes=[(1, 1, 5, 5)], labels=["Gas Cylinder"],
@@ -41,6 +43,13 @@ class TotalCountTest(unittest.TestCase):
         n = SystemController.MIN_CONSECUTIVE
         ctrl = self.run_frames([HIT] * n + [DetectionResult()] + [HIT] * n)
         self.assertEqual(ctrl.total_detections, 2)
+
+
+class ConfidenceLimitTest(unittest.TestCase):
+    def test_constructor_clamps_confidence(self):
+        self.assertEqual(DetectionModel(conf=2).conf, 0.95)
+        self.assertEqual(DetectionModel(conf=-1).conf, 0.05)
+        self.assertEqual(DetectionModel(conf=0.5).conf, 0.5)
 
 
 if __name__ == "__main__":

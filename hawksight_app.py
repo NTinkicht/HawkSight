@@ -602,15 +602,33 @@ class HawkSightApp(tk.Tk):
         self._controller = SystemController(
             self._video, self._model, self._processor
         )
+        self._start_result = None
         threading.Thread(target=self._load_and_start, daemon=True).start()
+        self.after(100, self._wait_for_start)
 
     def _load_and_start(self):
-        if not self._model.is_loaded:
-            self._model.load()
-        ok = self._controller.start()
-        self.after(0, self._post_start, ok)
+        # Runs on a worker thread: never touch tkinter here, only store the
+        # result for _wait_for_start to pick up on the main thread.
+        try:
+            if not self._model.is_loaded:
+                self._model.load()
+        except Exception as exc:
+            self._start_result = (False, "Model error",
+                                  f"⚠  Could not load model: {exc}")
+            return
+        if self._controller.start():
+            self._start_result = (True, "", "")
+        else:
+            self._start_result = (False, "Camera error",
+                                  "⚠  Could not open camera source.")
 
-    def _post_start(self, ok: bool):
+    def _wait_for_start(self):
+        if self._start_result is None:
+            self.after(100, self._wait_for_start)
+            return
+        self._post_start(*self._start_result)
+
+    def _post_start(self, ok: bool, status: str, message: str):
         self._lbl_loading.config(text="")
         if ok:
             self._btn_stop.config(
@@ -633,9 +651,12 @@ class HawkSightApp(tk.Tk):
             self._badge_id = self.after(900,  self._pulse_live_badge)
         else:
             self._btn_start.config(state=tk.NORMAL)
-            self._sv_status.set("Camera error")
+            self._btn_model_yolo.config(state=tk.NORMAL)
+            if CUSTOM_PT.exists():
+                self._btn_model_custom.config(state=tk.NORMAL)
+            self._sv_status.set(status)
             self._badge.config(text="● ERROR", fg=self.RED)
-            self._log_write("⚠  Could not open camera source.", "warn")
+            self._log_write(message, "warn")
 
     def _on_stop(self):
         for attr in ("_poll_id", "_timer_id", "_alert_id", "_badge_id"):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import queue
+import sys
 import threading
 import time
 from collections import deque
@@ -51,12 +52,17 @@ class VideoSource:
         self._latest: Optional[np.ndarray] = None
 
     def open(self) -> bool:
-        self._cap = cv2.VideoCapture(self._source)
+        is_camera = isinstance(self._source, int)
+        # On Windows, OpenCV's default camera driver (Media Foundation) takes
+        # 16-21 s to open on the dev webcam; DirectShow takes 3-4 s.
+        backend = (cv2.CAP_DSHOW if is_camera and sys.platform == "win32"
+                   else cv2.CAP_ANY)
+        self._cap = cv2.VideoCapture(self._source, backend)
         if not self._cap.isOpened():
             return False
         self._cap.set(cv2.CAP_PROP_FRAME_WIDTH,  1280)
         self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-        if isinstance(self._source, int):
+        if is_camera:
             self._latest  = None
             self._fresh.clear()
             self._reading = True

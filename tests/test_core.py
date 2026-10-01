@@ -61,8 +61,9 @@ class FakeCapture:
     one every 5 ms like a camera, then reports end of stream."""
     FRAMES = 40
 
-    def __init__(self, source):
+    def __init__(self, source, backend=0):   # 0 == cv2.CAP_ANY
         self.n = 0
+        self.backend = backend
 
     def isOpened(self):
         return True
@@ -113,6 +114,21 @@ class VideoSourceTest(unittest.TestCase):
         while (frame := video.read()) is not None:
             seen.append(int(frame[0, 0, 0]))
         self.assertEqual(seen, list(range(1, FakeCapture.FRAMES + 1)))
+
+    def test_windows_camera_uses_directshow(self):
+        with mock.patch.object(core.sys, "platform", "win32"):
+            video = self.open_video(0)
+        self.assertEqual(video._cap.backend, core.cv2.CAP_DSHOW)
+
+    def test_video_file_uses_default_backend(self):
+        with mock.patch.object(core.sys, "platform", "win32"):
+            video = self.open_video("clip.mp4")
+        self.assertEqual(video._cap.backend, core.cv2.CAP_ANY)
+
+    def test_other_platforms_use_default_backend(self):
+        with mock.patch.object(core.sys, "platform", "linux"):
+            video = self.open_video(0)
+        self.assertEqual(video._cap.backend, core.cv2.CAP_ANY)
 
 
 if __name__ == "__main__":

@@ -61,7 +61,7 @@ the desktop app with the `.venv` Python.
 1. Pick the camera number and confidence threshold in the sidebar (default 65 %).
 2. Choose the model: **Custom** (`hawksight_custom.pt`) or **YOLOv8n**, which
    uses the stock COCO "bottle" class as a stand-in for cylinders.
-3. Press **START** or `S`. The camera can take about 13 seconds to open on Windows.
+3. Press **START** or `S`. The camera takes a few seconds to open.
 
 | Key | Action |
 |-----|--------|
@@ -102,5 +102,4 @@ The sidebar shows:
 - Keyboard shortcuts work even when their button is disabled: `P` after stopping
   saves the last frame, and `X` while the model is loading confuses the display.
   They don't work with Caps Lock on.
-- Opening the camera is slow (~13 s) with the Windows Media Foundation driver.
 - In the command-line preview, the window title shows `\u2014` instead of a dash.

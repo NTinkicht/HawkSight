@@ -202,9 +202,12 @@ class HawkSightApp(tk.Tk):
     # ── Keyboard shortcuts ────────────────────────────────────────────────────
 
     def _bind_keys(self):
-        self.bind("<s>", lambda _: self._on_start())
-        self.bind("<x>", lambda _: self._on_stop())
-        self.bind("<p>", lambda _: self._on_snapshot())
+        # Each shortcut presses its button; invoke() does nothing while the
+        # button is disabled. Bind both cases so Caps Lock doesn't matter.
+        for key, button in (("s", self._btn_start), ("x", self._btn_stop),
+                            ("p", self._btn_snap)):
+            for k in (key, key.upper()):
+                self.bind(f"<{k}>", lambda _, b=button: b.invoke())
         self.bind("<F9>", lambda _: self._toggle_fullscreen())
         self.bind("<Escape>", lambda _: self._exit_fullscreen())
 

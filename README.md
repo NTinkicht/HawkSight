@@ -99,7 +99,4 @@ The sidebar shows:
 - The command-line tool doesn't use the 5-frame filter yet, so it can show
   one-frame false alarms. Its defaults (`yolov8n.pt`, 0.5) also differ from the
   desktop app's (custom model, 0.65).
-- Keyboard shortcuts work even when their button is disabled: `P` after stopping
-  saves the last frame, and `X` while the model is loading confuses the display.
-  They don't work with Caps Lock on.
 - In the command-line preview, the window title shows `\u2014` instead of a dash.

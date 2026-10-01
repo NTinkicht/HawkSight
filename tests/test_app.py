@@ -84,5 +84,35 @@ class SnapshotTest(AppTestCase):
         self.assertNotIn("saved", self.log_text())
 
 
+class KeyboardShortcutTest(AppTestCase):
+    def press(self, key):
+        self.app.focus_force()
+        self.app.update()
+        self.app.event_generate(f"<KeyPress-{key}>")
+        self.app.update()
+
+    def test_stop_key_does_nothing_while_stop_is_disabled(self):
+        self.press("x")
+        self.assertEqual(self.app._sv_status.get(), "Idle")
+
+    def test_snapshot_key_does_nothing_while_snapshot_is_disabled(self):
+        self.app._last_frame = np.zeros((10, 10, 3), dtype=np.uint8)
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(hawksight_app, "SNAP_DIR", Path(tmp)), \
+                mock.patch.object(self.app, "_log_write") as log:
+            self.press("p")
+            self.assertEqual(list(Path(tmp).iterdir()), [])
+        log.assert_not_called()
+
+    def test_start_key_works_with_caps_lock(self):
+        def broken_load():
+            raise RuntimeError("no model in tests")
+        self.app._model.load = broken_load
+        self.press("S")
+        self.assertNotEqual(self.app._sv_status.get(), "Idle")
+        _pump_until(self.app,
+                    lambda: str(self.app._btn_start["state"]) == tk.NORMAL)
+
+
 if __name__ == "__main__":
     unittest.main()

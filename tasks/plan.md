@@ -19,47 +19,49 @@ Each fix gets its own test or quick check, its own commit, and a push to `Majed-
 ## Task List
 
 ### Task 1: The app recovers when the model fails to load (#1)
-- [ ] An exception in `model.load()` or `controller.start()` re-enables START and the
+- [x] An exception in `model.load()` or `controller.start()` re-enables START and the
       model buttons, shows an error status, and writes the reason to the log.
-- [ ] The worker thread no longer calls `self.after(...)`.
+- [x] The worker thread no longer calls `self.after(...)`.
 - Verify: unit test with a model whose `load()` raises; GUI smoke check.
 - Files: `hawksight_app.py`, `tests/test_app.py` (new). Size: S
 
 ### Task 2: Safer snapshots (#6)
-- [ ] `snapshots/` is in `.gitignore`.
-- [ ] Two snapshots taken in the same second don't overwrite each other (milliseconds in the name).
-- [ ] A failed `cv2.imwrite` logs a warning instead of "saved".
+- [x] `snapshots/` is in `.gitignore`.
+- [x] Two snapshots taken in the same second don't overwrite each other (milliseconds in the name).
+- [x] A failed `cv2.imwrite` logs a warning instead of "saved".
 - Verify: unit tests using a temp folder; GUI smoke check.
 - Files: `.gitignore`, `hawksight_app.py`, `tests/test_app.py`. Size: S
 
 ### Task 3: "Total" counts alerts, not frames (#3)
-- [ ] Total goes up once each time a confirmed detection starts, not once per frame.
-- [ ] The streak resets on `start()`; the card label says "Alerts".
+- [x] Total goes up once each time a confirmed detection starts, not once per frame.
+- [x] The streak resets on `start()`; the card label says "Alerts".
 - Verify: unit test feeding frames through the controller; GUI smoke check.
 - Files: `src/core.py`, `hawksight_app.py`, `tests/test_core.py` (new). Size: S
 
 ### Checkpoint A (after tasks 1–3)
-- [ ] All tests pass, the GUI starts, and the CLI `--help` works.
+- [x] All tests pass, the GUI starts, and the CLI `--help` works.
 
 ### Task 4: The confidence limit applies from the start (#9)
-- [ ] `DetectionModel(conf=2)` gives 0.95, and `conf=-1` gives 0.05.
+- [x] `DetectionModel(conf=2)` gives 0.95, and `conf=-1` gives 0.05.
 - Verify: unit test.
 - Files: `src/core.py`, `tests/test_core.py`. Size: XS
 
 ### Task 5: Reduce camera lag (#4)
-- [ ] `VideoSource.open()` asks the camera for a 1-frame buffer, so the app processes recent frames.
-- Verify: unit test that the buffer setting is requested; real-camera latency must be
-  measured by hand (no camera test rig here).
+- [x] Live cameras are read on a background thread that keeps only the newest frame,
+      so the app processes recent frames. (The planned 1-frame buffer setting was
+      dropped: the DirectShow driver ignores it.) Video files still read every frame.
+- Verify: unit tests with a fake camera; real webcam measured (worst-case frame
+  age ~300 ms → ~33 ms with a simulated 300 ms detection step).
 - Files: `src/core.py`, `tests/test_core.py`. Size: XS
 
 ### Task 6: Pin dependencies (#2)
-- [ ] `requirements.txt` pins the exact versions that are installed and working.
-- [ ] The CLI `--model` help warns to load only trusted weight files.
+- [x] `requirements.txt` pins the exact versions that are installed and working.
+- [x] The CLI `--model` help warns to load only trusted weight files.
 - Verify: `pip install --dry-run -r requirements.txt` resolves; tests pass.
 - Files: `requirements.txt`, `hawksight.py`. Size: XS
 
 ### Checkpoint B (complete)
-- [ ] All tests pass, the GUI starts, and everything is pushed to `Majed-Branch`.
+- [x] All tests pass, the GUI starts, and everything is pushed to `Majed-Branch`.
 
 ## Risks and Mitigations
 | Risk | Impact | Mitigation |

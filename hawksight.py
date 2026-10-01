@@ -94,7 +94,8 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--model", default="yolov8n.pt",
-        help="Path to YOLO model weights (default: yolov8n.pt)",
+        help="Path to YOLO model weights (default: yolov8n.pt). Only load "
+             "weight files you trust: loading a .pt file can run code.",
     )
     parser.add_argument(
         "--conf", type=float, default=0.5,

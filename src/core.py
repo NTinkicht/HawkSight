@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import queue
+import sys
 import threading
 import time
 from collections import deque
@@ -12,6 +13,16 @@ from typing import Optional, Union
 
 import cv2
 import numpy as np
+
+
+# ─── Defaults shared by the desktop app and the CLI ─────────────────────────
+
+ROOT       = Path(__file__).resolve().parent.parent
+YOLO_PT    = ROOT / "yolov8n.pt"
+CUSTOM_PT  = ROOT / "hawksight_custom.pt"
+# Prefer the purpose-trained model when it is present.
+DEFAULT_MODEL = CUSTOM_PT if CUSTOM_PT.exists() else YOLO_PT
+DEFAULT_CONF  = 0.65
 
 
 # ─── Data ────────────────────────────────────────────────────────────────────
@@ -35,25 +46,70 @@ class DetectionResult:
 # ─── VideoSource ─────────────────────────────────────────────────────────────
 
 class VideoSource:
+    # A live camera is read nonstop on a background thread that keeps only the
+    # newest frame. Otherwise, when detection is slower than the camera, the
+    # driver's buffer fills and read() hands back frames that are seconds old.
+    # Video files are read in order on the caller's thread (no frame skipping).
+    READ_TIMEOUT = 2.0   # seconds without a new camera frame = stream ended
+
     def __init__(self, source: Union[int, str] = 0):
         self._source = source
         self._cap: Optional[cv2.VideoCapture] = None
+        self._reader: Optional[threading.Thread] = None
+        self._reading = False
+        self._lock    = threading.Lock()
+        self._fresh   = threading.Event()   # set when _latest holds a new frame
+        self._latest: Optional[np.ndarray] = None
 
     def open(self) -> bool:
-        self._cap = cv2.VideoCapture(self._source)
-        if self._cap.isOpened():
-            self._cap.set(cv2.CAP_PROP_FRAME_WIDTH,  1280)
-            self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-            return True
-        return False
+        is_camera = isinstance(self._source, int)
+        # On Windows, OpenCV's default camera driver (Media Foundation) takes
+        # 16-21 s to open on the dev webcam; DirectShow takes 3-4 s.
+        backend = (cv2.CAP_DSHOW if is_camera and sys.platform == "win32"
+                   else cv2.CAP_ANY)
+        self._cap = cv2.VideoCapture(self._source, backend)
+        if not self._cap.isOpened():
+            return False
+        self._cap.set(cv2.CAP_PROP_FRAME_WIDTH,  1280)
+        self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+        if is_camera:
+            self._latest  = None
+            self._fresh.clear()
+            self._reading = True
+            self._reader  = threading.Thread(target=self._read_forever,
+                                             daemon=True)
+            self._reader.start()
+        return True
+
+    def _read_forever(self):
+        while self._reading:
+            ok, frame = self._cap.read()
+            if not ok:
+                break
+            with self._lock:
+                self._latest = frame
+                self._fresh.set()
+        self._reading = False
+        self._fresh.set()   # wake read() so it sees the stream has ended
 
     def read(self) -> Optional[np.ndarray]:
         if self._cap is None or not self._cap.isOpened():
             return None
-        ok, frame = self._cap.read()
-        return frame if ok else None
+        if self._reader is None:
+            ok, frame = self._cap.read()
+            return frame if ok else None
+        if not self._fresh.wait(self.READ_TIMEOUT):
+            return None
+        with self._lock:
+            frame, self._latest = self._latest, None
+            self._fresh.clear()
+        return frame
 
     def release(self):
+        self._reading = False
+        if self._reader:
+            self._reader.join(timeout=2)
+            self._reader = None
         if self._cap:
             self._cap.release()
             self._cap = None
@@ -66,15 +122,15 @@ class VideoSource:
 
 class DetectionModel:
     # Stock COCO models have no "gas cylinder" class, so with yolov8n.pt the
-    # closest proxy ("bottle") is used.  A custom-trained checkpoint
-    # (hawksight_custom.pt, produced by train_hawksight.py) contains only
-    # cylinder classes, so every detection from it is accepted.
+    # closest proxy ("bottle") is used.  The custom checkpoint
+    # (hawksight_custom.pt) has a single gas_cylinder class, so every
+    # detection from it is accepted.
     PROXY_CLASSES = {"bottle"}
 
     def __init__(self, model_path: Union[str, Path] = "yolov8n.pt",
                  conf: float = 0.4):
         self._model_path = str(model_path)
-        self._conf       = conf
+        self.conf        = conf    # setter clamps to 0.05–0.95
         self._model      = None
         self._custom     = False   # True when a purpose-trained model is loaded
 
@@ -166,7 +222,10 @@ class SystemController:
     MIN_CONSECUTIVE = 5
 
     def __init__(self, video: VideoSource, model: DetectionModel,
-                 processor: FrameProcessor):
+                 processor: FrameProcessor, stop_on_end: bool = False):
+        # stop_on_end: stop when the source runs out of frames (end of a video
+        # file, or a camera that stops sending). Otherwise keep waiting.
+        self._stop_on_end = stop_on_end
         self._streak     = 0
         self._video      = video
         self._model      = model
@@ -185,6 +244,7 @@ class SystemController:
             return False
         self._running   = True
         self._total     = 0
+        self._streak    = 0
         self._start_ts  = time.monotonic()
         self._fps_times.clear()
         self._thread    = threading.Thread(target=self._loop, daemon=True)
@@ -201,22 +261,30 @@ class SystemController:
         while self._running:
             frame = self._video.read()
             if frame is None:
+                if self._stop_on_end:
+                    self._running = False
+                    break
                 time.sleep(0.05)
                 continue
-            self._fps_times.append(time.monotonic())
-            result       = self._model.predict(frame)
-            # Temporal filter: require MIN_CONSECUTIVE frames in a row.
-            self._streak = self._streak + 1 if result.count else 0
-            if self._streak < self.MIN_CONSECUTIVE:
-                result = DetectionResult()
-            self._total += result.count
-            annotated    = self._processor.annotate(frame, result)
-            if self._frame_q.full():
-                try:
-                    self._frame_q.get_nowait()
-                except queue.Empty:
-                    pass
-            self._frame_q.put((annotated, result))
+            self._handle_frame(frame)
+
+    def _handle_frame(self, frame: np.ndarray):
+        self._fps_times.append(time.monotonic())
+        result       = self._model.predict(frame)
+        # Temporal filter: require MIN_CONSECUTIVE frames in a row.
+        self._streak = self._streak + 1 if result.count else 0
+        if self._streak < self.MIN_CONSECUTIVE:
+            result = DetectionResult()
+        # Count each sighting once, when it is first confirmed, not every frame.
+        if self._streak == self.MIN_CONSECUTIVE:
+            self._total += 1
+        annotated    = self._processor.annotate(frame, result)
+        if self._frame_q.full():
+            try:
+                self._frame_q.get_nowait()
+            except queue.Empty:
+                pass
+        self._frame_q.put((annotated, result))
 
     def poll_frame(self):
         try:

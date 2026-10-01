@@ -35,25 +35,65 @@ class DetectionResult:
 # ─── VideoSource ─────────────────────────────────────────────────────────────
 
 class VideoSource:
+    # A live camera is read nonstop on a background thread that keeps only the
+    # newest frame. Otherwise, when detection is slower than the camera, the
+    # driver's buffer fills and read() hands back frames that are seconds old.
+    # Video files are read in order on the caller's thread (no frame skipping).
+    READ_TIMEOUT = 2.0   # seconds without a new camera frame = stream ended
+
     def __init__(self, source: Union[int, str] = 0):
         self._source = source
         self._cap: Optional[cv2.VideoCapture] = None
+        self._reader: Optional[threading.Thread] = None
+        self._reading = False
+        self._lock    = threading.Lock()
+        self._fresh   = threading.Event()   # set when _latest holds a new frame
+        self._latest: Optional[np.ndarray] = None
 
     def open(self) -> bool:
         self._cap = cv2.VideoCapture(self._source)
-        if self._cap.isOpened():
-            self._cap.set(cv2.CAP_PROP_FRAME_WIDTH,  1280)
-            self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-            return True
-        return False
+        if not self._cap.isOpened():
+            return False
+        self._cap.set(cv2.CAP_PROP_FRAME_WIDTH,  1280)
+        self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+        if isinstance(self._source, int):
+            self._latest  = None
+            self._fresh.clear()
+            self._reading = True
+            self._reader  = threading.Thread(target=self._read_forever,
+                                             daemon=True)
+            self._reader.start()
+        return True
+
+    def _read_forever(self):
+        while self._reading:
+            ok, frame = self._cap.read()
+            if not ok:
+                break
+            with self._lock:
+                self._latest = frame
+                self._fresh.set()
+        self._reading = False
+        self._fresh.set()   # wake read() so it sees the stream has ended
 
     def read(self) -> Optional[np.ndarray]:
         if self._cap is None or not self._cap.isOpened():
             return None
-        ok, frame = self._cap.read()
-        return frame if ok else None
+        if self._reader is None:
+            ok, frame = self._cap.read()
+            return frame if ok else None
+        if not self._fresh.wait(self.READ_TIMEOUT):
+            return None
+        with self._lock:
+            frame, self._latest = self._latest, None
+            self._fresh.clear()
+        return frame
 
     def release(self):
+        self._reading = False
+        if self._reader:
+            self._reader.join(timeout=2)
+            self._reader = None
         if self._cap:
             self._cap.release()
             self._cap = None

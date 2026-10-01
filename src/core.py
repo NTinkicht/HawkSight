@@ -185,6 +185,7 @@ class SystemController:
             return False
         self._running   = True
         self._total     = 0
+        self._streak    = 0
         self._start_ts  = time.monotonic()
         self._fps_times.clear()
         self._thread    = threading.Thread(target=self._loop, daemon=True)
@@ -203,20 +204,25 @@ class SystemController:
             if frame is None:
                 time.sleep(0.05)
                 continue
-            self._fps_times.append(time.monotonic())
-            result       = self._model.predict(frame)
-            # Temporal filter: require MIN_CONSECUTIVE frames in a row.
-            self._streak = self._streak + 1 if result.count else 0
-            if self._streak < self.MIN_CONSECUTIVE:
-                result = DetectionResult()
-            self._total += result.count
-            annotated    = self._processor.annotate(frame, result)
-            if self._frame_q.full():
-                try:
-                    self._frame_q.get_nowait()
-                except queue.Empty:
-                    pass
-            self._frame_q.put((annotated, result))
+            self._handle_frame(frame)
+
+    def _handle_frame(self, frame: np.ndarray):
+        self._fps_times.append(time.monotonic())
+        result       = self._model.predict(frame)
+        # Temporal filter: require MIN_CONSECUTIVE frames in a row.
+        self._streak = self._streak + 1 if result.count else 0
+        if self._streak < self.MIN_CONSECUTIVE:
+            result = DetectionResult()
+        # Count each sighting once, when it is first confirmed, not every frame.
+        if self._streak == self.MIN_CONSECUTIVE:
+            self._total += 1
+        annotated    = self._processor.annotate(frame, result)
+        if self._frame_q.full():
+            try:
+                self._frame_q.get_nowait()
+            except queue.Empty:
+                pass
+        self._frame_q.put((annotated, result))
 
     def poll_frame(self):
         try:

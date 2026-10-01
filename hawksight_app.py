@@ -390,7 +390,7 @@ class HawkSightApp(tk.Tk):
         c1 = self._make_card(grid, "Objects",    self._sv_objects, self.ORANGE, self.ORANGE)
         c2 = self._make_card(grid, "Confidence", self._sv_best,    self.GREEN,  self.GREEN)
         c3 = self._make_card(grid, "Runtime",    self._sv_runtime, self.BLUE,   self.FG)
-        c4 = self._make_card(grid, "Total",      self._sv_total,   self.PURPLE, self.FG)
+        c4 = self._make_card(grid, "Alerts",     self._sv_total,   self.PURPLE, self.FG)
 
         g = 5
         c1.grid(row=0, column=0, sticky="nsew", padx=(0, g), pady=(0, g))

@@ -694,10 +694,16 @@ class HawkSightApp(tk.Tk):
         if self._last_frame is None:
             return
         SNAP_DIR.mkdir(exist_ok=True)
-        ts   = datetime.now().strftime("%Y%m%d_%H%M%S")
+        ts   = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]  # to the ms
         path = SNAP_DIR / f"snap_{ts}.jpg"
-        cv2.imwrite(str(path), self._last_frame)
-        self._log_write(f"◎ snap_{ts}.jpg  saved", "snap")
+        n = 1
+        while path.exists():   # two snapshots in the same millisecond
+            path = SNAP_DIR / f"snap_{ts}_{n}.jpg"
+            n += 1
+        if cv2.imwrite(str(path), self._last_frame):
+            self._log_write(f"◎ {path.name}  saved", "snap")
+        else:
+            self._log_write(f"⚠  Could not save {path.name}", "warn")
 
     def _on_model_switch(self, key: str):
         if key == self._model_key or self._controller.is_running:

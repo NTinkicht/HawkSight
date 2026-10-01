@@ -15,6 +15,16 @@ import cv2
 import numpy as np
 
 
+# ─── Defaults shared by the desktop app and the CLI ─────────────────────────
+
+ROOT       = Path(__file__).resolve().parent.parent
+YOLO_PT    = ROOT / "yolov8n.pt"
+CUSTOM_PT  = ROOT / "hawksight_custom.pt"
+# Prefer the purpose-trained model when it is present.
+DEFAULT_MODEL = CUSTOM_PT if CUSTOM_PT.exists() else YOLO_PT
+DEFAULT_CONF  = 0.65
+
+
 # ─── Data ────────────────────────────────────────────────────────────────────
 
 @dataclass
@@ -212,7 +222,10 @@ class SystemController:
     MIN_CONSECUTIVE = 5
 
     def __init__(self, video: VideoSource, model: DetectionModel,
-                 processor: FrameProcessor):
+                 processor: FrameProcessor, stop_on_end: bool = False):
+        # stop_on_end: stop when the source runs out of frames (end of a video
+        # file, or a camera that stops sending). Otherwise keep waiting.
+        self._stop_on_end = stop_on_end
         self._streak     = 0
         self._video      = video
         self._model      = model
@@ -248,6 +261,9 @@ class SystemController:
         while self._running:
             frame = self._video.read()
             if frame is None:
+                if self._stop_on_end:
+                    self._running = False
+                    break
                 time.sleep(0.05)
                 continue
             self._handle_frame(frame)

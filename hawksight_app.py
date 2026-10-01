@@ -17,6 +17,7 @@ from PIL import Image, ImageTk
 
 sys.path.insert(0, str(Path(__file__).parent))
 from src.core import (
+    CUSTOM_PT, DEFAULT_CONF, DEFAULT_MODEL, YOLO_PT,
     DetectionResult, VideoSource, DetectionModel,
     FrameProcessor, SystemController,
 )
@@ -28,12 +29,9 @@ ASSETS_DIR = _ROOT / "assets"
 LOGO_PNG   = ASSETS_DIR / "HawkSight_Logo.png"
 LOGO_ICO   = ASSETS_DIR / "HawkSight_Logo.ico"
 # Two selectable model checkpoints — user can toggle between them at runtime.
-YOLO_PT   = _ROOT / "yolov8n.pt"
-CUSTOM_PT = _ROOT / "hawksight_custom.pt"
 MODEL_PATHS  = {"yolo": YOLO_PT, "custom": CUSTOM_PT}
 MODEL_LABELS = {"yolo": "YOLOv8n (bottle proxy)", "custom": "HawkSight custom"}
-# Prefer the purpose-trained model if train_hawksight.py has produced one.
-DEFAULT_MODEL_KEY = "custom" if CUSTOM_PT.exists() else "yolo"
+DEFAULT_MODEL_KEY = "custom" if DEFAULT_MODEL == CUSTOM_PT else "yolo"
 SNAP_DIR = _ROOT / "snapshots"
 
 # ─── Fonts ───────────────────────────────────────────────────────────────────
@@ -519,12 +517,12 @@ class HawkSightApp(tk.Tk):
         row2.pack(fill=tk.X)
         tk.Label(row2, text="Confidence threshold",
                  font=(FONT, 9), bg=self.PANEL, fg=self.FG_MID).pack(side=tk.LEFT)
-        self._lbl_conf = tk.Label(row2, text="65%",
+        self._lbl_conf = tk.Label(row2, text=f"{DEFAULT_CONF:.0%}",
                                    font=(FONT, 9, "bold"),
                                    bg=self.PANEL, fg=self.ORANGE)
         self._lbl_conf.pack(side=tk.RIGHT)
 
-        self._sv_conf = tk.DoubleVar(value=0.65)
+        self._sv_conf = tk.DoubleVar(value=DEFAULT_CONF)
         ttk.Scale(
             cfg, from_=0.05, to=0.95, orient=tk.HORIZONTAL,
             variable=self._sv_conf, command=self._on_conf_change,
@@ -573,7 +571,7 @@ class HawkSightApp(tk.Tk):
     # ── Backend ───────────────────────────────────────────────────────────────
 
     def _init_backend(self):
-        self._model      = DetectionModel(MODEL_PATHS[self._model_key], conf=0.65)
+        self._model      = DetectionModel(MODEL_PATHS[self._model_key], conf=DEFAULT_CONF)
         self._video      = VideoSource(0)
         self._processor  = FrameProcessor()
         self._controller = SystemController(

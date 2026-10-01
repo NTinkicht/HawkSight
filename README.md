@@ -40,16 +40,18 @@ window support, so the command-line preview fails with it installed.
 .venv\Scripts\pythonw.exe hawksight_app.py
 
 # Command-line tool (press Q in the preview window to quit)
-.venv\Scripts\python.exe hawksight.py --model hawksight_custom.pt
-.venv\Scripts\python.exe hawksight.py --model hawksight_custom.pt --source 1 --conf 0.6
-.venv\Scripts\python.exe hawksight.py --model hawksight_custom.pt --source video.mp4
+.venv\Scripts\python.exe hawksight.py
+.venv\Scripts\python.exe hawksight.py --source 1 --conf 0.5
+.venv\Scripts\python.exe hawksight.py --source video.mp4
 ```
+
+The command-line tool uses the same detection pipeline and defaults as the desktop app.
 
 | Option | Meaning | Default |
 |--------|---------|---------|
 | `--source` | Camera number (0, 1, …) or a video file path | `0` |
-| `--model` | Model weights file | `yolov8n.pt` |
-| `--conf` | Confidence threshold, limited to 0.05–0.95 | `0.5` |
+| `--model` | Model weights file | `hawksight_custom.pt` (`yolov8n.pt` if missing) |
+| `--conf` | Confidence threshold, limited to 0.05–0.95 | `0.65` |
 
 Only load model files you trust: loading a `.pt` file can run code.
 
@@ -96,7 +98,4 @@ The sidebar shows:
 
 ## Known issues
 
-- The command-line tool doesn't use the 5-frame filter yet, so it can show
-  one-frame false alarms. Its defaults (`yolov8n.pt`, 0.5) also differ from the
-  desktop app's (custom model, 0.65).
 - In the command-line preview, the window title shows `\u2014` instead of a dash.

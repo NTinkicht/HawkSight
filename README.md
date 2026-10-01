@@ -14,10 +14,24 @@ It uses a YOLO object-detection model and comes in two forms:
 | `hawksight_app.py` | Desktop app (tkinter) |
 | `hawksight.py` | Command-line tool |
 | `src/core.py` | Camera capture, detection, frame annotation, background processing |
-| `hawksight_custom.pt` | Custom-trained cylinder model, used by default |
+| `hawksight_custom.pt` | Fine-tuned gas-cylinder model, used by default (see [Model](#model)) |
 | `assets/` | Logo and window icon |
 | `tests/` | Automated tests (fake camera and model; no webcam or internet needed) |
 | `requirements.txt` | Exact package versions |
+
+## Model
+
+`hawksight_custom.pt` is **YOLOv8n fine-tuned on a Roboflow gas-cylinder dataset**.
+
+| | |
+|---|---|
+| Base model | YOLOv8n |
+| Classes | 1: `gas_cylinder` |
+| Accuracy | **71.6% mAP50-95** on a held-out test set |
+
+The app shows each detection as "Gas Cylinder". If `hawksight_custom.pt` is
+missing, the app falls back to stock `yolov8n.pt`, using the COCO "bottle" class
+as a rough stand-in.
 
 ## Setup (once)
 

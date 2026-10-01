@@ -122,9 +122,9 @@ class VideoSource:
 
 class DetectionModel:
     # Stock COCO models have no "gas cylinder" class, so with yolov8n.pt the
-    # closest proxy ("bottle") is used.  A custom-trained checkpoint
-    # (hawksight_custom.pt, produced by train_hawksight.py) contains only
-    # cylinder classes, so every detection from it is accepted.
+    # closest proxy ("bottle") is used.  The custom checkpoint
+    # (hawksight_custom.pt) has a single gas_cylinder class, so every
+    # detection from it is accepted.
     PROXY_CLASSES = {"bottle"}
 
     def __init__(self, model_path: Union[str, Path] = "yolov8n.pt",

@@ -233,8 +233,6 @@ class HawkSightApp(tk.Tk):
     GREEN_DK  = "#186a3b"
     RED       = "#c0392b"   # calmer red
     RED_DK    = "#6e1c16"
-    BLUE      = "#2e86c1"   # softer blue
-    PURPLE    = "#8e44ad"
     FG        = "#d8d8d8"
     FG_MID    = "#b4b4b4"   # secondary text, ~7:1 on PANEL
     FG_DIM    = "#9a9a9a"   # labels and hints, >= 4.5:1 on PANEL and CARD_BG
@@ -1231,8 +1229,10 @@ class HawkSightApp(tk.Tk):
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     def on_close(self):
-        if self._replay_id:
-            self.after_cancel(self._replay_id)
+        # Cancel every scheduled callback (frame polling, scan wait, replay,
+        # status restore, …) so none fires after the window is gone.
+        for after_id in self.tk.splitlist(self.tk.call("after", "info")):
+            self.after_cancel(after_id)
         self._controller.stop()
         self.destroy()
 

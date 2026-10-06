@@ -3,8 +3,9 @@
 HawkSight watches a live camera feed and alerts you when it sees a gas cylinder.
 It uses a YOLO object-detection model and comes in two forms:
 
-- **Desktop app** (`hawksight_app.py`): video panel, a red detection light with "How sure",
-  snapshots, and a detection log.
+- **Desktop app** (`hawksight_app.py`): live video with green boxes, a red
+  detection light with "How sure", screenshots, a 15-second replay, camera and
+  model dropdowns, and a detection log.
 - **Command-line tool** (`hawksight.py`): a plain OpenCV preview window.
 
 ## Project layout

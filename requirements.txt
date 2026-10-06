@@ -1,4 +1,9 @@
-ultralytics
-opencv-python
-pillow
-numpy
+# Exact versions so every install gets the same, known-good packages.
+# Upgrade one package at a time, read its changelog, and rerun the tests.
+ultralytics==8.4.46
+opencv-python==4.13.0.92   # NOT opencv-python-headless: the CLI needs cv2.imshow
+pillow==12.2.0
+numpy==2.3.5
+# Pulled in by ultralytics; pinned because they are the largest dependencies.
+torch==2.11.0
+torchvision==0.26.0

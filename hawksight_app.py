@@ -17,6 +17,7 @@ from PIL import Image, ImageTk
 
 sys.path.insert(0, str(Path(__file__).parent))
 from src.core import (
+    CUSTOM_PT, DEFAULT_CONF, DEFAULT_MODEL, YOLO_PT,
     DetectionResult, VideoSource, DetectionModel,
     FrameProcessor, SystemController,
 )
@@ -28,12 +29,9 @@ ASSETS_DIR = _ROOT / "assets"
 LOGO_PNG   = ASSETS_DIR / "HawkSight_Logo.png"
 LOGO_ICO   = ASSETS_DIR / "HawkSight_Logo.ico"
 # Two selectable model checkpoints — user can toggle between them at runtime.
-YOLO_PT   = _ROOT / "yolov8n.pt"
-CUSTOM_PT = _ROOT / "hawksight_custom.pt"
 MODEL_PATHS  = {"yolo": YOLO_PT, "custom": CUSTOM_PT}
 MODEL_LABELS = {"yolo": "YOLOv8n (bottle proxy)", "custom": "HawkSight custom"}
-# Prefer the purpose-trained model if train_hawksight.py has produced one.
-DEFAULT_MODEL_KEY = "custom" if CUSTOM_PT.exists() else "yolo"
+DEFAULT_MODEL_KEY = "custom" if DEFAULT_MODEL == CUSTOM_PT else "yolo"
 SNAP_DIR = _ROOT / "snapshots"
 
 # ─── Fonts ───────────────────────────────────────────────────────────────────
@@ -202,9 +200,12 @@ class HawkSightApp(tk.Tk):
     # ── Keyboard shortcuts ────────────────────────────────────────────────────
 
     def _bind_keys(self):
-        self.bind("<s>", lambda _: self._on_start())
-        self.bind("<x>", lambda _: self._on_stop())
-        self.bind("<p>", lambda _: self._on_snapshot())
+        # Each shortcut presses its button; invoke() does nothing while the
+        # button is disabled. Bind both cases so Caps Lock doesn't matter.
+        for key, button in (("s", self._btn_start), ("x", self._btn_stop),
+                            ("p", self._btn_snap)):
+            for k in (key, key.upper()):
+                self.bind(f"<{k}>", lambda _, b=button: b.invoke())
         self.bind("<F9>", lambda _: self._toggle_fullscreen())
         self.bind("<Escape>", lambda _: self._exit_fullscreen())
 
@@ -390,7 +391,7 @@ class HawkSightApp(tk.Tk):
         c1 = self._make_card(grid, "Objects",    self._sv_objects, self.ORANGE, self.ORANGE)
         c2 = self._make_card(grid, "Confidence", self._sv_best,    self.GREEN,  self.GREEN)
         c3 = self._make_card(grid, "Runtime",    self._sv_runtime, self.BLUE,   self.FG)
-        c4 = self._make_card(grid, "Total",      self._sv_total,   self.PURPLE, self.FG)
+        c4 = self._make_card(grid, "Alerts",     self._sv_total,   self.PURPLE, self.FG)
 
         g = 5
         c1.grid(row=0, column=0, sticky="nsew", padx=(0, g), pady=(0, g))
@@ -516,12 +517,12 @@ class HawkSightApp(tk.Tk):
         row2.pack(fill=tk.X)
         tk.Label(row2, text="Confidence threshold",
                  font=(FONT, 9), bg=self.PANEL, fg=self.FG_MID).pack(side=tk.LEFT)
-        self._lbl_conf = tk.Label(row2, text="65%",
+        self._lbl_conf = tk.Label(row2, text=f"{DEFAULT_CONF:.0%}",
                                    font=(FONT, 9, "bold"),
                                    bg=self.PANEL, fg=self.ORANGE)
         self._lbl_conf.pack(side=tk.RIGHT)
 
-        self._sv_conf = tk.DoubleVar(value=0.65)
+        self._sv_conf = tk.DoubleVar(value=DEFAULT_CONF)
         ttk.Scale(
             cfg, from_=0.05, to=0.95, orient=tk.HORIZONTAL,
             variable=self._sv_conf, command=self._on_conf_change,
@@ -570,7 +571,7 @@ class HawkSightApp(tk.Tk):
     # ── Backend ───────────────────────────────────────────────────────────────
 
     def _init_backend(self):
-        self._model      = DetectionModel(MODEL_PATHS[self._model_key], conf=0.65)
+        self._model      = DetectionModel(MODEL_PATHS[self._model_key], conf=DEFAULT_CONF)
         self._video      = VideoSource(0)
         self._processor  = FrameProcessor()
         self._controller = SystemController(
@@ -602,15 +603,33 @@ class HawkSightApp(tk.Tk):
         self._controller = SystemController(
             self._video, self._model, self._processor
         )
+        self._start_result = None
         threading.Thread(target=self._load_and_start, daemon=True).start()
+        self.after(100, self._wait_for_start)
 
     def _load_and_start(self):
-        if not self._model.is_loaded:
-            self._model.load()
-        ok = self._controller.start()
-        self.after(0, self._post_start, ok)
+        # Runs on a worker thread: never touch tkinter here, only store the
+        # result for _wait_for_start to pick up on the main thread.
+        try:
+            if not self._model.is_loaded:
+                self._model.load()
+        except Exception as exc:
+            self._start_result = (False, "Model error",
+                                  f"⚠  Could not load model: {exc}")
+            return
+        if self._controller.start():
+            self._start_result = (True, "", "")
+        else:
+            self._start_result = (False, "Camera error",
+                                  "⚠  Could not open camera source.")
 
-    def _post_start(self, ok: bool):
+    def _wait_for_start(self):
+        if self._start_result is None:
+            self.after(100, self._wait_for_start)
+            return
+        self._post_start(*self._start_result)
+
+    def _post_start(self, ok: bool, status: str, message: str):
         self._lbl_loading.config(text="")
         if ok:
             self._btn_stop.config(
@@ -633,9 +652,12 @@ class HawkSightApp(tk.Tk):
             self._badge_id = self.after(900,  self._pulse_live_badge)
         else:
             self._btn_start.config(state=tk.NORMAL)
-            self._sv_status.set("Camera error")
+            self._btn_model_yolo.config(state=tk.NORMAL)
+            if CUSTOM_PT.exists():
+                self._btn_model_custom.config(state=tk.NORMAL)
+            self._sv_status.set(status)
             self._badge.config(text="● ERROR", fg=self.RED)
-            self._log_write("⚠  Could not open camera source.", "warn")
+            self._log_write(message, "warn")
 
     def _on_stop(self):
         for attr in ("_poll_id", "_timer_id", "_alert_id", "_badge_id"):
@@ -673,10 +695,16 @@ class HawkSightApp(tk.Tk):
         if self._last_frame is None:
             return
         SNAP_DIR.mkdir(exist_ok=True)
-        ts   = datetime.now().strftime("%Y%m%d_%H%M%S")
+        ts   = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]  # to the ms
         path = SNAP_DIR / f"snap_{ts}.jpg"
-        cv2.imwrite(str(path), self._last_frame)
-        self._log_write(f"◎ snap_{ts}.jpg  saved", "snap")
+        n = 1
+        while path.exists():   # two snapshots in the same millisecond
+            path = SNAP_DIR / f"snap_{ts}_{n}.jpg"
+            n += 1
+        if cv2.imwrite(str(path), self._last_frame):
+            self._log_write(f"◎ {path.name}  saved", "snap")
+        else:
+            self._log_write(f"⚠  Could not save {path.name}", "warn")
 
     def _on_model_switch(self, key: str):
         if key == self._model_key or self._controller.is_running:

@@ -15,13 +15,15 @@ from __future__ import annotations
 
 import argparse
 import sys
-import time
 from pathlib import Path
 
 import cv2
 
 sys.path.insert(0, str(Path(__file__).parent))
-from src.core import VideoSource, DetectionModel, FrameProcessor
+from src.core import (
+    DEFAULT_CONF, DEFAULT_MODEL,
+    DetectionModel, FrameProcessor, SystemController, VideoSource,
+)
 
 
 # ─── Status overlay ──────────────────────────────────────────────────────────
@@ -40,51 +42,42 @@ def _draw_status(frame, n_objects: int, fps: float) -> None:
 # ─── Main run loop ───────────────────────────────────────────────────────────
 
 def run(source: int | str, model_path: str, conf: float) -> None:
-    video     = VideoSource(source)
-    model     = DetectionModel(model_path, conf=conf)
-    processor = FrameProcessor()
+    model = DetectionModel(model_path, conf=conf)
+    # Same pipeline as the desktop app, including the consecutive-frame
+    # filter; stop_on_end ends the run when a video file finishes.
+    controller = SystemController(VideoSource(source), model,
+                                  FrameProcessor(), stop_on_end=True)
 
     print(f"Loading model: {model_path}")
     model.load()
     print("Model loaded. Opening camera/source…")
 
-    if not video.open():
+    if not controller.start():
         sys.exit(f"ERROR: Cannot open video source: {source!r}")
 
     WINDOW = "HawkSight — Gas Cylinder Detection  (Q = quit)"
-    fps_times: list[float] = []
     print("Running. Press Q in the window to quit.\n")
 
     try:
-        while True:
-            frame = video.read()
-            if frame is None:
-                print("Stream ended.")
-                break
-
-            t = time.monotonic()
-            fps_times.append(t)
-            # keep a rolling 30-frame window
-            fps_times = fps_times[-30:]
-            fps = (len(fps_times) - 1) / (fps_times[-1] - fps_times[0]) \
-                  if len(fps_times) >= 2 else 0.0
-
-            result    = model.predict(frame)
-            annotated = processor.annotate(frame, result)
-            _draw_status(annotated, result.count, fps)
-
-            cv2.imshow(WINDOW, annotated)
+        while controller.is_running:
+            data = controller.poll_frame()
+            if data is not None:
+                annotated, result = data
+                _draw_status(annotated, result.count, controller.fps)
+                cv2.imshow(WINDOW, annotated)
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
+        else:
+            print("Stream ended.")
     finally:
-        video.release()
+        controller.stop()
         cv2.destroyAllWindows()
         print("HawkSight stopped.")
 
 
 # ─── Entry point ─────────────────────────────────────────────────────────────
 
-if __name__ == "__main__":
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="HawkSight CLI — gas cylinder detection"
     )
@@ -93,14 +86,19 @@ if __name__ == "__main__":
         help="Camera index (0, 1, …) or path to a video file (default: 0)",
     )
     parser.add_argument(
-        "--model", default="yolov8n.pt",
-        help="Path to YOLO model weights (default: yolov8n.pt)",
+        "--model", default=str(DEFAULT_MODEL),
+        help=f"Path to YOLO model weights (default: {DEFAULT_MODEL.name}). "
+             "Only load weight files you trust: loading a .pt file can run code.",
     )
     parser.add_argument(
-        "--conf", type=float, default=0.5,
-        help="Confidence threshold 0.05–0.95 (default: 0.5)",
+        "--conf", type=float, default=DEFAULT_CONF,
+        help=f"Confidence threshold 0.05–0.95 (default: {DEFAULT_CONF})",
     )
-    args = parser.parse_args()
+    return parser.parse_args(argv)
+
+
+if __name__ == "__main__":
+    args = parse_args()
 
     try:
         source: int | str = int(args.source)

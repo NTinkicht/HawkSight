@@ -33,6 +33,12 @@ MODEL_PATHS  = {"custom": CUSTOM_PT, "yolo": YOLO_PT}
 MODEL_LABELS = {"custom": "HawkSight custom", "yolo": "YOLOv8n (bottle proxy)"}
 DEFAULT_MODEL_KEY = "custom" if DEFAULT_MODEL == CUSTOM_PT else "yolo"
 SNAP_DIR = _ROOT / "snapshots"
+# On a laptop, camera 0 is the built-in one. Used when the scan finds nothing.
+LAPTOP_CAMERA = 0
+
+
+def camera_label(index: int) -> str:
+    return f"Camera {index} (laptop)" if index == LAPTOP_CAMERA else f"Camera {index}"
 
 
 def available_model_keys() -> list[str]:
@@ -646,10 +652,6 @@ class HawkSightApp(tk.Tk):
             self._log_write("Still looking for cameras, try again in a moment.",
                             "div")
             return
-        if self._camera is None:
-            self._log_write("⚠  No camera found. Connect one and press ⟳ "
-                            "to rescan.", "warn")
-            return
         self._starting = True
         self._set_camera_controls()
         self._btn_start.config(state=tk.DISABLED)
@@ -695,8 +697,11 @@ class HawkSightApp(tk.Tk):
         if self._controller.start():
             self._start_result = (True, "", "")
         else:
-            self._start_result = (False, "Camera error",
-                                  "⚠  Could not open camera source.")
+            self._start_result = (
+                False, "Camera error",
+                f"⚠  Could not open {camera_label(self._camera)}. Close other "
+                "apps using it (Teams, Zoom, Camera), check Windows Settings › "
+                "Privacy & security › Camera, then press START again.")
 
     def _wait_for_start(self):
         if self._start_result is None:
@@ -723,7 +728,7 @@ class HawkSightApp(tk.Tk):
             self._badge.config(text="● LIVE", fg=self.GREEN)
             self._last_log_count = -1
             self._last_log_time  = 0.0
-            self._log_write(f"── session started · Camera {self._camera} ──",
+            self._log_write(f"── session started · {camera_label(self._camera)} ──",
                             "div")
             self._poll_id  = self.after(30,   self._poll_frames)
             self._timer_id = self.after(1000, self._tick_timer)
@@ -831,28 +836,30 @@ class HawkSightApp(tk.Tk):
             return
         self._scanning = False
         self._cameras  = found[0]
-        self._cmb_camera.config(values=[f"Camera {i}" for i in self._cameras])
-        if self._camera not in self._cameras:
-            self._camera = self._cameras[0] if self._cameras else None
-        if self._camera is None:
-            self._sv_camera.set("No camera found")
-            self._log_write("⚠  No camera found. Connect one and press ⟳ "
-                            "to rescan.", "warn")
-        else:
-            self._sv_camera.set(f"Camera {self._camera}")
+        if self._cameras:
             n = len(self._cameras)
             self._log_write(f"◆ {n} camera{'s' if n != 1 else ''} found", "div")
+        else:
+            # The scan can miss a camera that will still open (busy, or only
+            # reachable through Media Foundation), so offer the laptop camera.
+            self._cameras = [LAPTOP_CAMERA]
+            self._log_write("◆ No other camera found, using the laptop camera.",
+                            "div")
+        self._cmb_camera.config(values=[camera_label(i) for i in self._cameras])
+        if self._camera not in self._cameras:
+            self._camera = self._cameras[0]
+        self._sv_camera.set(camera_label(self._camera))
         self._set_camera_controls()
 
     def _on_camera_selected(self, _=None):
         self._cmb_camera.selection_clear()
         label = self._sv_camera.get()
-        index = next((i for i in self._cameras if f"Camera {i}" == label), None)
+        index = next((i for i in self._cameras if camera_label(i) == label), None)
         if index is None or index == self._camera:
-            self._sv_camera.set(f"Camera {self._camera}")
+            self._sv_camera.set(camera_label(self._camera))
             return
         self._camera = index
-        self._log_write(f"◆ camera switched → Camera {index}", "div")
+        self._log_write(f"◆ camera switched → {camera_label(index)}", "div")
         if self._controller.is_running:
             # Release the old camera completely before opening the new one.
             self._on_stop()

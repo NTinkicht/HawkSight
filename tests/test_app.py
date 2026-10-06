@@ -186,8 +186,8 @@ class CameraDropdownTest(AppTestCase):
 
     def test_dropdown_lists_connected_cameras(self):
         self.assertEqual(list(self.app._cmb_camera["values"]),
-                         ["Camera 0", "Camera 2"])
-        self.assertEqual(self.app._sv_camera.get(), "Camera 0")
+                         ["Camera 0 (laptop)", "Camera 2"])
+        self.assertEqual(self.app._sv_camera.get(), "Camera 0 (laptop)")
         self.assertEqual(str(self.app._cmb_camera["state"]), "readonly")
 
     def test_start_uses_the_chosen_camera(self):
@@ -213,17 +213,29 @@ class CameraDropdownTest(AppTestCase):
         self.app._btn_rescan.invoke()
         _pump_until(self.app, lambda: not self.app._scanning)
         self.assertEqual(list(self.app._cmb_camera["values"]),
-                         ["Camera 0", "Camera 1", "Camera 2"])
+                         ["Camera 0 (laptop)", "Camera 1", "Camera 2"])
         self.assertEqual(self.app._sv_camera.get(), "Camera 2")
 
-    def test_no_camera_found_blocks_start_with_a_message(self):
+    def test_no_camera_found_falls_back_to_laptop_camera(self):
+        self.choose("Camera 2")
         self.CAMERAS = []
         self.app._btn_rescan.invoke()
         _pump_until(self.app, lambda: not self.app._scanning)
-        self.assertEqual(self.app._sv_camera.get(), "No camera found")
-        self.app._on_start()
-        self.assertEqual(FakeVideo.opened, [])
-        self.assertIn("No camera found", self.log_text())
+        self.assertEqual(self.app._sv_camera.get(), "Camera 0 (laptop)")
+        self.assertIn("using the laptop camera", self.log_text())
+        self.start_and_wait()
+        self.assertEqual([v.source for v in FakeVideo.opened], [0])
+
+    def test_camera_that_will_not_open_explains_what_to_check(self):
+        class Unopenable(FakeVideo):
+            def open(self):
+                return False
+        with mock.patch.object(hawksight_app, "VideoSource", Unopenable):
+            self.app._on_start()
+            _pump_until(self.app,
+                        lambda: self.app._sv_status.get() == "Camera error")
+        self.assertIn("Could not open Camera 0 (laptop)", self.log_text())
+        self.assertIn("Privacy", self.log_text())
         self.assertEqual(str(self.app._btn_start["state"]), tk.NORMAL)
 
 

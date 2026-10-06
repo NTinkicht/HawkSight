@@ -81,7 +81,10 @@ the desktop app with the `.venv` Python.
 
 1. Pick a camera from the **Camera** dropdown. HawkSight scans for connected
    cameras when it opens and lists each one as "Camera 0", "Camera 1", … (the
-   number Windows gives it). Plugged in a camera later? Press **⟳** to rescan.
+   number Windows gives it). Camera 0 is shown as "(laptop)" because on a laptop
+   it is the built-in camera. If the scan finds no camera, HawkSight still offers
+   the laptop camera, and on Windows it retries with Media Foundation when
+   DirectShow can't open a camera. Plugged in a camera later? Press **⟳ Rescan**.
    You can switch cameras while the feed is live: the old camera is released
    and the new one starts (a camera takes a few seconds to open).
    Set the confidence threshold with the slider (default 65 %).

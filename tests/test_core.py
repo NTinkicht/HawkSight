@@ -132,6 +132,29 @@ class VideoSourceTest(unittest.TestCase):
             video = self.open_video(0)
         self.assertEqual(video._cap.backend, core.cv2.CAP_DSHOW)
 
+    def test_windows_falls_back_to_media_foundation(self):
+        class DshowFails(FakeCapture):
+            def isOpened(self):
+                return self.backend != core.cv2.CAP_DSHOW
+        patcher = mock.patch.object(core.cv2, "VideoCapture", DshowFails)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        with mock.patch.object(core.sys, "platform", "win32"):
+            video = VideoSource(0)
+            self.addCleanup(video.release)
+            self.assertTrue(video.open())
+        self.assertEqual(video._cap.backend, core.cv2.CAP_MSMF)
+
+    def test_camera_that_never_opens_reports_failure(self):
+        class NeverOpens(FakeCapture):
+            def isOpened(self):
+                return False
+        with mock.patch.object(core.cv2, "VideoCapture", NeverOpens), \
+             mock.patch.object(core.sys, "platform", "win32"):
+            video = VideoSource(0)
+            self.assertFalse(video.open())
+            self.assertFalse(video.is_open())
+
     def test_video_file_uses_default_backend(self):
         with mock.patch.object(core.sys, "platform", "win32"):
             video = self.open_video("clip.mp4")

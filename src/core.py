@@ -96,9 +96,18 @@ class VideoSource:
 
     def open(self) -> bool:
         is_camera = isinstance(self._source, int)
-        backend   = _camera_backend() if is_camera else cv2.CAP_ANY
-        self._cap = cv2.VideoCapture(self._source, backend)
-        if not self._cap.isOpened():
+        # Some laptop cameras only work through Media Foundation, so on
+        # Windows try it when DirectShow can't open the camera (slower start).
+        backends  = [_camera_backend()] if is_camera else [cv2.CAP_ANY]
+        if is_camera and backends[0] == cv2.CAP_DSHOW:
+            backends.append(cv2.CAP_MSMF)
+        for backend in backends:
+            self._cap = cv2.VideoCapture(self._source, backend)
+            if self._cap.isOpened():
+                break
+            self._cap.release()
+        else:
+            self._cap = None
             return False
         self._cap.set(cv2.CAP_PROP_FRAME_WIDTH,  1280)
         self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)

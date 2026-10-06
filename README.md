@@ -80,8 +80,10 @@ the desktop app with the `.venv` Python.
 ## Using the desktop app
 
 1. Pick the camera number and confidence threshold in the sidebar (default 65 %).
-2. Choose the model: **Custom** (`hawksight_custom.pt`) or **YOLOv8n**, which
-   uses the stock COCO "bottle" class as a stand-in for cylinders.
+2. Pick a model from the **Detection model** dropdown: **HawkSight custom**
+   (`hawksight_custom.pt`, only listed when the file exists) or **YOLOv8n (bottle
+   proxy)**, which uses the stock COCO "bottle" class as a stand-in for cylinders.
+   The dropdown is locked while the feed is running; press STOP to change model.
 3. Press **START** or `S`. The camera takes a few seconds to open.
 
 | Key | Action |

@@ -55,7 +55,7 @@ class ModelLoadFailureTest(AppTestCase):
             self.app, lambda: str(self.app._btn_start["state"]) == tk.NORMAL)
 
         self.assertTrue(recovered, "START button stayed disabled")
-        self.assertEqual(str(self.app._btn_model_yolo["state"]), tk.NORMAL)
+        self.assertEqual(str(self.app._cmb_model["state"]), "readonly")
         self.assertEqual(self.app._sv_status.get(), "Model error")
         self.assertIn("weights file is corrupt", self.log_text())
         self.assertFalse(self.app._controller.is_running)
@@ -95,6 +95,45 @@ class StockModelTest(AppTestCase):
         self.assertTrue(recovered, "START button stayed disabled")
         self.assertIn("Could not download yolov8n.pt", self.log_text())
         self.assertIn("internet connection", self.log_text())
+
+
+class ModelDropdownTest(AppTestCase):
+    def choose(self, label):
+        self.app._sv_model.set(label)
+        self.app._cmb_model.event_generate("<<ComboboxSelected>>")
+        self.app.update()
+
+    def test_dropdown_lists_every_available_model(self):
+        self.assertEqual(
+            list(self.app._cmb_model["values"]),
+            [hawksight_app.MODEL_LABELS[k]
+             for k in hawksight_app.available_model_keys()])
+        self.assertIn(hawksight_app.MODEL_LABELS["yolo"],
+                      self.app._cmb_model["values"])
+
+    def test_choosing_a_model_switches_to_it(self):
+        self.app._on_model_switch("custom")
+        self.choose(hawksight_app.MODEL_LABELS["yolo"])
+        self.assertEqual(self.app._model_key, "yolo")
+        self.assertEqual(self.app._model._model_path,
+                         str(hawksight_app.MODEL_PATHS["yolo"]))
+        self.assertIn("model switched", self.log_text())
+
+    def test_custom_model_is_hidden_when_its_file_is_missing(self):
+        paths = dict(hawksight_app.MODEL_PATHS,
+                     custom=Path("does_not_exist.pt"))
+        with mock.patch.object(hawksight_app, "MODEL_PATHS", paths):
+            self.assertEqual(hawksight_app.available_model_keys(), ["yolo"])
+
+    def test_dropdown_is_locked_while_starting(self):
+        def broken_load():
+            raise RuntimeError("no model in tests")
+        self.app._model.load = broken_load
+        self.app._on_start()
+        self.assertEqual(str(self.app._cmb_model["state"]), tk.DISABLED)
+        _pump_until(self.app,
+                    lambda: str(self.app._btn_start["state"]) == tk.NORMAL)
+        self.assertEqual(str(self.app._cmb_model["state"]), "readonly")
 
 
 class SnapshotTest(AppTestCase):

@@ -28,11 +28,17 @@ _ROOT      = Path(__file__).parent
 ASSETS_DIR = _ROOT / "assets"
 LOGO_PNG   = ASSETS_DIR / "HawkSight_Logo.png"
 LOGO_ICO   = ASSETS_DIR / "HawkSight_Logo.ico"
-# Two selectable model checkpoints — user can toggle between them at runtime.
-MODEL_PATHS  = {"yolo": YOLO_PT, "custom": CUSTOM_PT}
-MODEL_LABELS = {"yolo": "YOLOv8n (bottle proxy)", "custom": "HawkSight custom"}
+# Selectable model checkpoints, in dropdown order.
+MODEL_PATHS  = {"custom": CUSTOM_PT, "yolo": YOLO_PT}
+MODEL_LABELS = {"custom": "HawkSight custom", "yolo": "YOLOv8n (bottle proxy)"}
 DEFAULT_MODEL_KEY = "custom" if DEFAULT_MODEL == CUSTOM_PT else "yolo"
 SNAP_DIR = _ROOT / "snapshots"
+
+
+def available_model_keys() -> list[str]:
+    """Models the dropdown offers: stock YOLOv8n is always available (it is
+    downloaded on first use); the custom model only when its file exists."""
+    return [k for k, p in MODEL_PATHS.items() if k == "yolo" or p.exists()]
 
 # ─── Fonts ───────────────────────────────────────────────────────────────────
 
@@ -179,6 +185,7 @@ class HawkSightApp(tk.Tk):
         self._is_fullscreen = False
 
         self._load_icon()
+        self._init_styles()
         self._build_ui()
         self._init_backend()
         self._bind_keys()
@@ -196,6 +203,43 @@ class HawkSightApp(tk.Tk):
                 self.iconphoto(True, self._icon_ref)
             except Exception:
                 pass
+
+    # ── ttk styles ────────────────────────────────────────────────────────────
+
+    def _init_styles(self):
+        # "clam" is the built-in theme that honours custom colours on Windows.
+        style = ttk.Style(self)
+        style.theme_use("clam")
+        style.configure(
+            "Dark.TCombobox",
+            fieldbackground=self.CARD_BG, background=self.CARD_BG,
+            foreground=self.FG, arrowcolor=self.FG_MID,
+            bordercolor=self.SEP, lightcolor=self.CARD_BG,
+            darkcolor=self.CARD_BG, padding=(8, 5),
+        )
+        style.map(
+            "Dark.TCombobox",
+            fieldbackground=[("readonly", self.CARD_BG),
+                             ("disabled", self.PANEL)],
+            foreground=[("disabled", self.FG_DIM), ("readonly", self.FG)],
+            selectbackground=[("readonly", self.CARD_BG)],
+            selectforeground=[("readonly", self.FG)],
+            bordercolor=[("focus", self.ORANGE)],
+            arrowcolor=[("disabled", self.FG_DIM)],
+        )
+        style.configure("TScale", background=self.ORANGE,
+                        troughcolor=self.CARD_BG, bordercolor=self.SEP,
+                        lightcolor=self.ORANGE, darkcolor=self.ORANGE_DK)
+        style.configure("Vertical.TScrollbar", background=self.SEP,
+                        troughcolor=self.CARD_BG, bordercolor=self.CARD_BG,
+                        arrowcolor=self.FG_MID, lightcolor=self.SEP,
+                        darkcolor=self.SEP)
+        # The dropdown list is a plain Tk listbox, styled through the option db.
+        self.option_add("*TCombobox*Listbox.background", self.CARD_BG)
+        self.option_add("*TCombobox*Listbox.foreground", self.FG)
+        self.option_add("*TCombobox*Listbox.selectBackground", self.ORANGE)
+        self.option_add("*TCombobox*Listbox.selectForeground", "white")
+        self.option_add("*TCombobox*Listbox.font", (FONT, 9))
 
     # ── Keyboard shortcuts ────────────────────────────────────────────────────
 
@@ -463,38 +507,21 @@ class HawkSightApp(tk.Tk):
         cfg = tk.Frame(parent, bg=self.PANEL)
         cfg.pack(fill=tk.X, padx=8, pady=8)
 
-        # Detection model toggle
+        # Detection model dropdown
         row0 = tk.Frame(cfg, bg=self.PANEL)
         row0.pack(fill=tk.X, pady=(0, 9))
         tk.Label(row0, text="Detection model",
                  font=(FONT, 9), bg=self.PANEL, fg=self.FG_MID).pack(anchor=tk.W)
 
-        toggle = tk.Frame(row0, bg=self.PANEL)
-        toggle.pack(fill=tk.X, pady=(4, 0))
-        toggle.columnconfigure(0, weight=1)
-        toggle.columnconfigure(1, weight=1)
-
-        seg_cfg = dict(font=(FONT, 9, "bold"), relief=tk.FLAT,
-                       cursor="hand2", bd=0)
-        self._btn_model_yolo = tk.Button(
-            toggle, text="YOLOv8n",
-            command=lambda: self._on_model_switch("yolo"), **seg_cfg,
+        self._model_keys = available_model_keys()
+        self._sv_model = tk.StringVar(value=MODEL_LABELS[self._model_key])
+        self._cmb_model = ttk.Combobox(
+            row0, textvariable=self._sv_model, state="readonly",
+            values=[MODEL_LABELS[k] for k in self._model_keys],
+            style="Dark.TCombobox", font=(FONT, 9),
         )
-        self._btn_model_yolo.grid(row=0, column=0, sticky="ew", padx=(0, 3), ipady=6)
-
-        self._btn_model_custom = tk.Button(
-            toggle, text="Custom",
-            command=lambda: self._on_model_switch("custom"), **seg_cfg,
-        )
-        self._btn_model_custom.grid(row=0, column=1, sticky="ew", padx=(3, 0), ipady=6)
-
-        if not CUSTOM_PT.exists():
-            self._btn_model_custom.config(
-                state=tk.DISABLED,
-                bg=self.PANEL, fg=self.FG_DIM,
-            )
-
-        self._refresh_model_buttons()
+        self._cmb_model.pack(fill=tk.X, pady=(4, 0))
+        self._cmb_model.bind("<<ComboboxSelected>>", self._on_model_selected)
 
         # Camera source row
         row1 = tk.Frame(cfg, bg=self.PANEL)
@@ -585,9 +612,7 @@ class HawkSightApp(tk.Tk):
         if self._controller.is_running:
             return
         self._btn_start.config(state=tk.DISABLED)
-        self._btn_model_yolo.config(state=tk.DISABLED)
-        if CUSTOM_PT.exists():
-            self._btn_model_custom.config(state=tk.DISABLED)
+        self._cmb_model.config(state=tk.DISABLED)
         if self._model.is_loaded or MODEL_PATHS[self._model_key].exists():
             self._sv_status.set("Loading model…")
             self._lbl_loading.config(
@@ -666,9 +691,7 @@ class HawkSightApp(tk.Tk):
             self._badge_id = self.after(900,  self._pulse_live_badge)
         else:
             self._btn_start.config(state=tk.NORMAL)
-            self._btn_model_yolo.config(state=tk.NORMAL)
-            if CUSTOM_PT.exists():
-                self._btn_model_custom.config(state=tk.NORMAL)
+            self._cmb_model.config(state="readonly")
             self._sv_status.set(status)
             self._badge.config(text="● ERROR", fg=self.RED)
             self._log_write(message, "warn")
@@ -693,9 +716,7 @@ class HawkSightApp(tk.Tk):
             bg="#242c38", fg="#6080a0",
         )
         self._btn_start.config(state=tk.NORMAL)
-        self._btn_model_yolo.config(state=tk.NORMAL)
-        if CUSTOM_PT.exists():
-            self._btn_model_custom.config(state=tk.NORMAL)
+        self._cmb_model.config(state="readonly")
         self._sv_status.set("Stopped")
         self._sv_fps.set("—")
         self._sv_runtime.set("00:00")
@@ -720,6 +741,15 @@ class HawkSightApp(tk.Tk):
         else:
             self._log_write(f"⚠  Could not save {path.name}", "warn")
 
+    def _on_model_selected(self, _=None):
+        key = next((k for k in self._model_keys
+                    if MODEL_LABELS[k] == self._sv_model.get()), None)
+        if key is not None:
+            self._on_model_switch(key)
+        # Show the model actually in use (unchanged if the switch was refused).
+        self._sv_model.set(MODEL_LABELS[self._model_key])
+        self._cmb_model.selection_clear()
+
     def _on_model_switch(self, key: str):
         if key == self._model_key or self._controller.is_running:
             return
@@ -729,29 +759,9 @@ class HawkSightApp(tk.Tk):
             return
         self._model_key = key
         self._model.switch(path)
-        self._refresh_model_buttons()
+        self._sv_model.set(MODEL_LABELS[key])
         self._sv_footer.set(f"{MODEL_LABELS[key]} · HawkSight v2.0 · CIS 4913")
         self._log_write(f"◆ model switched → {MODEL_LABELS[key]}", "div")
-
-    def _refresh_model_buttons(self):
-        active, inactive = self.ORANGE, self.CARD_BG
-        active_fg, inactive_fg = "white", self.FG_MID
-
-        is_yolo = self._model_key == "yolo"
-        self._btn_model_yolo.config(
-            bg=active if is_yolo else inactive,
-            fg=active_fg if is_yolo else inactive_fg,
-            activebackground=active if is_yolo else self.SEP,
-            activeforeground="white",
-        )
-        if self._btn_model_custom.cget("state") != tk.DISABLED:
-            is_custom = self._model_key == "custom"
-            self._btn_model_custom.config(
-                bg=active if is_custom else inactive,
-                fg=active_fg if is_custom else inactive_fg,
-                activebackground=active if is_custom else self.SEP,
-                activeforeground="white",
-            )
 
     def _on_conf_change(self, _=None):
         v = self._sv_conf.get()

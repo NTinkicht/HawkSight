@@ -386,6 +386,12 @@ class HawkSightApp(tk.Tk):
         inner = tk.Frame(hdr, bg=self.HEADER)
         inner.pack(fill=tk.BOTH, expand=True, padx=S4, pady=S2)
 
+        # Second row: the settings, side by side, above the orange line.
+        tk.Frame(hdr, bg=self.SEP, height=1).pack(fill=tk.X, padx=S4)
+        strip = tk.Frame(hdr, bg=self.HEADER)
+        strip.pack(fill=tk.X, padx=S4, pady=S2)
+        self._build_settings(strip)
+
         # Logo image
         self._hdr_logo = None
         try:
@@ -428,13 +434,6 @@ class HawkSightApp(tk.Tk):
         self._btn_replay = PillButton(
             tools, f"⏪  Replay last {REPLAY_SECONDS}s", self._on_replay, **pill)
         self._btn_replay.pack(side=tk.LEFT)
-        # Shown only while a replay is playing.
-        self._btn_continue = PillButton(
-            tools, "▶  Continue live", self._on_continue,
-            parent_bg=self.HEADER, bg=self.GREEN, fg="white",
-            hover_bg=self.GREEN_DK, hover_fg="white",
-            off_bg=self.PANEL, off_fg="#77777a",
-            font=(FONT, 10, "bold"), padx=18, pady=8)
         self._btn_shot.set_enabled(False)
         self._btn_replay.set_enabled(False)
 
@@ -517,7 +516,6 @@ class HawkSightApp(tk.Tk):
         sb.pack(side=tk.RIGHT, fill=tk.Y)
         sb.pack_propagate(False)
 
-        self._build_settings(self._section(sb, "Settings"))
         self._build_indicator(sb)
         self._build_controls(self._section(sb, "Camera on / off"))
         self._build_log(sb)
@@ -584,69 +582,64 @@ class HawkSightApp(tk.Tk):
         )
         self._btn_stop.pack(fill=tk.X, pady=(self.S2, 0), ipady=self.S1 + 2)
 
+        # Loading indicator: only takes up space while a model is loading.
+        self._lbl_loading = tk.Label(parent, text="", wraplength=240,
+                                     justify=tk.LEFT,
+                                     font=(FONT, 9, "italic"),
+                                     bg=self.PANEL, fg=self.ORANGE_LT)
+
     # ── Settings ──────────────────────────────────────────────────────────────
 
-    def _field_label(self, parent, text: str):
-        tk.Label(parent, text=text, font=(FONT, 9),
-                 bg=self.PANEL, fg=self.FG_MID).pack(anchor=tk.W,
-                                                    pady=(0, self.S1))
+    def _build_settings(self, bar):
+        S1, S2, S4 = self.S1, self.S2, self.S4
+        bg = self.HEADER
 
-    def _build_settings(self, cfg):
-        S1, S2, S3 = self.S1, self.S2, self.S3
+        def label(text):
+            tk.Label(bar, text=text, font=(FONT, 9), bg=bg,
+                     fg=self.FG_MID).pack(side=tk.LEFT, padx=(0, S2))
 
         # Detection model dropdown
-        self._field_label(cfg, "What to look for")
+        label("What to look for")
         self._model_keys = available_model_keys()
         self._sv_model = tk.StringVar(value=MODEL_LABELS[self._model_key])
         self._cmb_model = ttk.Combobox(
-            cfg, textvariable=self._sv_model, state="readonly",
+            bar, textvariable=self._sv_model, state="readonly", width=28,
             values=[MODEL_LABELS[k] for k in self._model_keys],
             style="Dark.TCombobox", font=(FONT, 9),
         )
-        self._cmb_model.pack(fill=tk.X, pady=(0, S3))
+        self._cmb_model.pack(side=tk.LEFT, padx=(0, S4 * 2))
         self._cmb_model.bind("<<ComboboxSelected>>", self._on_model_selected)
 
         # Camera dropdown + rescan button
-        self._field_label(cfg, "Camera")
-        cam_row = tk.Frame(cfg, bg=self.PANEL)
-        cam_row.pack(fill=tk.X, pady=(0, S3))
+        label("Camera")
+        self._sv_camera = tk.StringVar(value="Scanning for cameras…")
+        self._cmb_camera = ttk.Combobox(
+            bar, textvariable=self._sv_camera, state=tk.DISABLED, width=18,
+            style="Dark.TCombobox", font=(FONT, 9),
+        )
+        self._cmb_camera.pack(side=tk.LEFT)
+        self._cmb_camera.bind("<<ComboboxSelected>>", self._on_camera_selected)
         self._btn_rescan = tk.Button(
-            cam_row, text="⟳ Find cameras", font=(FONT, 9),
+            bar, text="⟳ Find cameras", font=(FONT, 9),
             bg=self.CARD_BG, fg=self.FG,
             disabledforeground=self.FG_DIM,
             activebackground=self.SEP, activeforeground=self.ORANGE_LT,
             relief=tk.FLAT, bd=0, cursor="hand2", padx=S2,
             command=self._scan_cameras,
         )
-        self._btn_rescan.pack(side=tk.RIGHT, fill=tk.Y, padx=(S2, 0))
-        self._sv_camera = tk.StringVar(value="Scanning for cameras…")
-        self._cmb_camera = ttk.Combobox(
-            cam_row, textvariable=self._sv_camera, state=tk.DISABLED,
-            style="Dark.TCombobox", font=(FONT, 9),
-        )
-        self._cmb_camera.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        self._cmb_camera.bind("<<ComboboxSelected>>", self._on_camera_selected)
+        self._btn_rescan.pack(side=tk.LEFT, fill=tk.Y, padx=(S1, S4 * 2))
 
         # Confidence slider
-        row = tk.Frame(cfg, bg=self.PANEL)
-        row.pack(fill=tk.X)
-        tk.Label(row, text="How sure before it alerts",
-                 font=(FONT, 9), bg=self.PANEL, fg=self.FG_MID).pack(side=tk.LEFT)
-        self._lbl_conf = tk.Label(row, text=f"{DEFAULT_CONF:.0%}",
-                                  font=(FONT, 9, "bold"),
-                                  bg=self.PANEL, fg=self.ORANGE)
-        self._lbl_conf.pack(side=tk.RIGHT)
-
+        label("How sure before it alerts")
         self._sv_conf = tk.DoubleVar(value=DEFAULT_CONF)
         ttk.Scale(
-            cfg, from_=0.05, to=0.95, orient=tk.HORIZONTAL,
+            bar, from_=0.05, to=0.95, orient=tk.HORIZONTAL, length=160,
             variable=self._sv_conf, command=self._on_conf_change,
-        ).pack(fill=tk.X, pady=(S1, 0))
-
-        # Loading indicator: only takes up space while a model is loading.
-        self._lbl_loading = tk.Label(cfg, text="",
-                                     font=(FONT, 9, "italic"),
-                                     bg=self.PANEL, fg=self.ORANGE_LT)
+        ).pack(side=tk.LEFT)
+        self._lbl_conf = tk.Label(bar, text=f"{DEFAULT_CONF:.0%}",
+                                  font=(FONT, 9, "bold"),
+                                  bg=bg, fg=self.ORANGE)
+        self._lbl_conf.pack(side=tk.LEFT, padx=(S2, 0))
 
     def _set_loading(self, text: str):
         self._lbl_loading.config(text=text)
@@ -663,6 +656,16 @@ class HawkSightApp(tk.Tk):
         # The log is hidden until "Show log" is clicked.
         bar = tk.Frame(parent, bg=self.PANEL)
         bar.pack(fill=tk.X, padx=S3, pady=(S3, 0))
+        self._log_bar = bar
+
+        # Shown under "Show log" only while a replay is playing.
+        self._btn_continue = tk.Button(
+            parent, text="▶   CONTINUE LIVE", font=(FONT, 12, "bold"),
+            bg=self.GREEN, fg="white",
+            activebackground=self.GREEN_DK, activeforeground="white",
+            relief=tk.FLAT, bd=0, cursor="hand2",
+            command=self._on_continue,
+        )
         self._btn_log = tk.Button(
             bar, text="▸  Show log", font=(FONT, 9, "bold"), anchor=tk.W,
             bg=self.PANEL, fg=self.FG_MID,
@@ -872,7 +875,9 @@ class HawkSightApp(tk.Tk):
             self.after_cancel(self._replay_id)
         self._replay_frames = frames
         self._replay_i = 0
-        self._btn_continue.pack(side=tk.LEFT, padx=(self.S3, 0))
+        self._btn_continue.pack(after=self._log_bar, fill=tk.X,
+                                padx=self.S3, pady=(self.S3, 0),
+                                ipady=self.S2)
         self._log_write(f"⏪ replaying the last {self._replay.duration:.0f} s",
                         "div")
         self._replay_step()

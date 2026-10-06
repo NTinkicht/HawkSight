@@ -110,14 +110,16 @@ Two buttons at the top of the window:
   It works while the camera is on, and the status bar confirms each save.
 - **⏪ Replay last 15s** plays the last 15 seconds in the main video area, at
   their real speed, with a red "REPLAY 0:05 / 0:15" tag. It loops until you
-  press the green **▶ Continue live** button that appears next to it (or `C`).
+  press the big green **▶ CONTINUE LIVE** button that appears in the sidebar
+  under "Show log" (or `C`).
   Detection keeps running in the background during a replay. Replay still works
   after STOP and starts fresh on the next START. It keeps only the frames the
   detector processed, so on a slow PC (low FPS) it will look choppy.
 
+The settings sit in a row in the top bar, under the logo: **What to look for**,
+**Camera** with **⟳ Find cameras**, and **How sure before it alerts**.
+
 The sidebar has these parts, from the top:
-- **Settings:** **What to look for**, **Camera** with **⟳ Find cameras**, and
-  **How sure before it alerts**.
 - **Light + How sure:** a small light that blinks red while a gas cylinder is
   spotted, next to how sure the detector is (for example 87 %). Grey means
   nothing is spotted or the camera is off.

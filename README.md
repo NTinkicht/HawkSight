@@ -108,8 +108,8 @@ the desktop app with the `.venv` Python.
 Two buttons at the top of the window:
 - **◉ Screenshot** saves the current frame (with its boxes) to `snapshots/`.
   It works while the camera is on, and the status bar confirms each save.
-  The newest screenshot also appears at the bottom of the sidebar under
-  **LAST SCREENSHOT**, with the time it was taken; click it to open the picture.
+  The newest screenshot also appears at the bottom right of the sidebar under
+  a **Screenshot** title, with the time it was taken; click it to open it.
 - **⏪ Replay last 15s** plays the last 15 seconds in the main video area, at
   their real speed, with a red "REPLAY 0:05 / 0:15" tag. It loops until you
   press the big green **▶ CONTINUE LIVE** button that appears in the sidebar
@@ -126,8 +126,8 @@ The sidebar has these parts, from the top:
   spotted, next to how sure the detector is (for example 87 %). Grey means
   nothing is spotted or the camera is off.
 - **Camera on / off:** START and STOP. The button you can press next is lit
-  and the other is dark: while the camera is on, STOP is bright red; while it
-  is off, START is bright green.
+  and the other is dark: while the camera is on, STOP is neon red; while it is
+  off, START is neon green.
 - **Show log:** hidden until clicked. Lists sightings, photos, detector and
   camera changes, and problems.
 

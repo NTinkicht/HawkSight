@@ -240,7 +240,10 @@ class HawkSightApp(tk.Tk):
     FG_DIM    = "#9a9a9a"   # labels and hints, >= 4.5:1 on PANEL and CARD_BG
 
     # START / STOP: the button you can press next is lit; the other is dark.
-    LIT  = {"start": "#2ecc71", "stop": "#e74c3c"}
+    # Neon: dark text, since white is unreadable on neon green.
+    LIT  = {"start": "#39ff14", "stop": "#ff1744"}
+    LIT_FG = "#0a0a0a"
+    GLOW_RING = {"start": "#1e8f0a", "stop": "#99112b"}   # soft neon halo
     DARK = {"start": ("#0e2016", "#4d7d62"), "stop": ("#241010", "#85514c")}
 
     # Spacing scale (px): every gap in the layout is one of these.
@@ -568,19 +571,23 @@ class HawkSightApp(tk.Tk):
     def _build_controls(self, parent):
         cfg = dict(relief=tk.FLAT, cursor="hand2", bd=0)
 
+        self._ring_start = tk.Frame(parent, bg=self.PANEL)
+        self._ring_start.pack(fill=tk.X)
         self._btn_start = tk.Button(
-            parent, text="▶   START", font=(FONT, 12, "bold"),
+            self._ring_start, text="▶   START", font=(FONT, 12, "bold"),
             activebackground=self.GREEN_DK, activeforeground="white",
             command=self._on_start, **cfg,
         )
-        self._btn_start.pack(fill=tk.X, ipady=self.S2)
+        self._btn_start.pack(fill=tk.X, padx=3, pady=3, ipady=self.S2)
 
+        self._ring_stop = tk.Frame(parent, bg=self.PANEL)
+        self._ring_stop.pack(fill=tk.X, pady=(self.S1, 0))
         self._btn_stop = tk.Button(
-            parent, text="■   STOP", font=(FONT, 12, "bold"),
+            self._ring_stop, text="■   STOP", font=(FONT, 12, "bold"),
             activebackground=self.RED_DK, activeforeground="white",
             command=self._on_stop, state=tk.DISABLED, **cfg,
         )
-        self._btn_stop.pack(fill=tk.X, pady=(self.S2, 0), ipady=self.S2)
+        self._btn_stop.pack(fill=tk.X, padx=3, pady=3, ipady=self.S2)
         self._set_power_look(running=False)
 
         # Loading indicator: only takes up space while a model is loading.
@@ -590,13 +597,15 @@ class HawkSightApp(tk.Tk):
                                      bg=self.PANEL, fg=self.ORANGE_LT)
 
     def _set_power_look(self, running: bool):
-        """Camera on: STOP lit red, START dark. Camera off: START lit green,
-        STOP dark. Steady colours, no animation."""
-        for name, btn in (("start", self._btn_start), ("stop", self._btn_stop)):
+        """Camera on: STOP neon red, START dark. Camera off: START neon
+        green, STOP dark. Steady colours, no animation."""
+        for name, btn, ring in (("start", self._btn_start, self._ring_start),
+                                ("stop", self._btn_stop, self._ring_stop)):
             lit = (name == "stop") == running
-            bg, fg = (self.LIT[name], "white") if lit else self.DARK[name]
+            bg, fg = (self.LIT[name], self.LIT_FG) if lit else self.DARK[name]
             # Disabled buttons keep these colours instead of greying out.
             btn.config(bg=bg, fg=fg, disabledforeground=fg)
+            ring.config(bg=self.GLOW_RING[name] if lit else self.PANEL)
 
     # ── Settings ──────────────────────────────────────────────────────────────
 
@@ -673,11 +682,11 @@ class HawkSightApp(tk.Tk):
         if not self._shot_widgets_built:
             head = tk.Frame(self._shot_box, bg=self.PANEL)
             head.pack(fill=tk.X, pady=(self.S3, S2))
-            tk.Label(head, text="LAST SCREENSHOT", font=(FONT, 8, "bold"),
-                     bg=self.PANEL, fg=self.FG_DIM).pack(side=tk.LEFT)
-            self._lbl_shot_time = tk.Label(head, font=(FONT, 8),
+            tk.Label(head, text="◉  Screenshot", font=(FONT, 11, "bold"),
+                     bg=self.PANEL, fg=self.FG).pack(side=tk.LEFT)
+            self._lbl_shot_time = tk.Label(head, font=(FONT, 9),
                                            bg=self.PANEL, fg=self.FG_DIM)
-            self._lbl_shot_time.pack(side=tk.RIGHT)
+            self._lbl_shot_time.pack(side=tk.RIGHT, anchor=tk.S)
             # Thin orange frame around the picture; click to open it.
             ring = tk.Frame(self._shot_box, bg=self.ORANGE)
             ring.pack()

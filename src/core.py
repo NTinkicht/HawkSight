@@ -257,6 +257,52 @@ class FrameProcessor:
         return canvas
 
 
+# ─── ReplayBuffer ────────────────────────────────────────────────────────────
+
+class ReplayBuffer:
+    """The last `seconds` of frames, for the "Replay" button. Frames are
+    stored as JPEGs at most MAX_WIDTH wide: 15 s of raw 720p video at 30 fps
+    would take over 1 GB, compressed it is a few MB."""
+    MAX_WIDTH = 960
+
+    def __init__(self, seconds: float = 15.0, quality: int = 80):
+        self.seconds  = seconds
+        self._quality = quality
+        self._items: deque = deque()   # (timestamp, jpeg bytes)
+
+    def add(self, frame: np.ndarray, t: Optional[float] = None):
+        t = time.monotonic() if t is None else t
+        h, w = frame.shape[:2]
+        if w > self.MAX_WIDTH:
+            frame = cv2.resize(frame, (self.MAX_WIDTH, h * self.MAX_WIDTH // w),
+                               interpolation=cv2.INTER_AREA)
+        ok, jpg = cv2.imencode(".jpg", frame,
+                               [cv2.IMWRITE_JPEG_QUALITY, self._quality])
+        if not ok:
+            return
+        self._items.append((t, jpg))
+        while t - self._items[0][0] > self.seconds:
+            self._items.popleft()
+
+    def clear(self):
+        self._items.clear()
+
+    def __len__(self) -> int:
+        return len(self._items)
+
+    @property
+    def duration(self) -> float:
+        return self._items[-1][0] - self._items[0][0] if self._items else 0.0
+
+    def frames(self) -> list:
+        """[(seconds since the first frame, BGR frame), ...] oldest first."""
+        if not self._items:
+            return []
+        t0 = self._items[0][0]
+        return [(t - t0, cv2.imdecode(jpg, cv2.IMREAD_COLOR))
+                for t, jpg in self._items]
+
+
 # ─── SystemController ────────────────────────────────────────────────────────
 
 class SystemController:

@@ -241,8 +241,6 @@ class CameraDropdownTest(AppTestCase):
 
 
 class EasyUiTest(AppTestCase):
-    def test_there_is_no_snapshot_button(self):
-        self.assertFalse(hasattr(self.app, "_btn_snap"))
 
     def test_log_is_hidden_until_show_log_is_clicked(self):
         self.assertFalse(self.app.log_visible)
@@ -314,7 +312,67 @@ class PhotoKeyTest(AppTestCase):
         self.app.event_generate("<KeyPress-p>")
         self.app.update()
         self.assertEqual(len(list(self.snap_dir.glob("*.jpg"))), 1)
-        self.assertIn("Photo saved", self.app._sv_status.get())
+        self.assertIn("Screenshot saved", self.app._sv_status.get())
+
+
+class HeaderButtonsTest(AppTestCase):
+    def setUp(self):
+        super().setUp()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.snap_dir = Path(tmp.name)
+        for name, value in (("SNAP_DIR", self.snap_dir),
+                            ("VideoSource", FakeVideo)):
+            patcher = mock.patch.object(hawksight_app, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.app._model.load = lambda: None
+
+    def start_and_wait_for_frames(self, n=5):
+        self.app._on_start()
+        self.assertTrue(_pump_until(self.app, lambda: len(self.app._replay) >= n))
+
+    def test_both_buttons_are_off_before_start(self):
+        self.assertFalse(self.app._btn_shot.enabled)
+        self.assertFalse(self.app._btn_replay.enabled)
+        self.app._btn_shot.invoke()
+        self.app._btn_replay.invoke()
+        self.assertEqual(list(self.snap_dir.iterdir()), [])
+        self.assertIsNone(self.app._replay_win)
+
+    def test_screenshot_button_saves_while_camera_is_on(self):
+        self.start_and_wait_for_frames(1)
+        self.assertTrue(self.app._btn_shot.enabled)
+        self.app._btn_shot.invoke()
+        self.assertEqual(len(list(self.snap_dir.glob("*.jpg"))), 1)
+        self.app._on_stop()
+        self.assertFalse(self.app._btn_shot.enabled)
+
+    def test_replay_plays_back_recorded_frames(self):
+        self.start_and_wait_for_frames(5)
+        self.assertTrue(self.app._btn_replay.enabled)
+        self.app._btn_replay.invoke()
+        win = self.app._replay_win
+        self.assertIsNotNone(win)
+        self.assertTrue(_pump_until(self.app, lambda: win.finished, timeout=10))
+        win.close()
+
+    def test_replay_still_works_after_stop_and_resets_on_next_start(self):
+        self.start_and_wait_for_frames(3)
+        self.app._on_stop()
+        self.assertTrue(self.app._btn_replay.enabled)
+        self.app._on_start()
+        _pump_until(self.app, lambda: self.app._sv_status.get() == "Watching")
+        self.assertLessEqual(len(self.app._replay), 2)
+
+    def test_r_key_opens_replay(self):
+        self.start_and_wait_for_frames(3)
+        self.app.focus_force()
+        self.app.update()
+        self.app.event_generate("<KeyPress-r>")
+        self.app.update()
+        self.assertIsNotNone(self.app._replay_win)
+        self.app._replay_win.close()
 
 
 class SnapshotTest(AppTestCase):

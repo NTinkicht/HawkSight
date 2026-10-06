@@ -12,6 +12,7 @@ from typing import Optional
 import cv2
 import numpy as np
 import tkinter as tk
+import tkinter.font as tkfont
 from tkinter import ttk
 from PIL import Image, ImageTk
 
@@ -19,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from src.core import (
     CUSTOM_PT, DEFAULT_CONF, DEFAULT_MODEL, YOLO_PT,
     DetectionResult, VideoSource, DetectionModel,
-    FrameProcessor, SystemController, list_cameras,
+    FrameProcessor, ReplayBuffer, SystemController, list_cameras,
 )
 
 # ─── Paths ───────────────────────────────────────────────────────────────────
@@ -34,6 +35,7 @@ MODEL_LABELS = {"custom": "HawkSight (best for cylinders)",
                 "yolo":   "Basic YOLOv8n (spots bottles)"}
 DEFAULT_MODEL_KEY = "custom" if DEFAULT_MODEL == CUSTOM_PT else "yolo"
 SNAP_DIR = _ROOT / "snapshots"
+REPLAY_SECONDS = 15
 # On a laptop, camera 0 is the built-in one. Used when the scan finds nothing.
 LAPTOP_CAMERA = 0
 
@@ -151,6 +153,153 @@ class DisplayManager:
             )
 
 
+# ─── PillButton ──────────────────────────────────────────────────────────────
+
+class PillButton(tk.Canvas):
+    """A small rounded button (Tk buttons can't have round corners), with a
+    hover glow and a dimmed disabled look. invoke() does nothing while it is
+    disabled, like tk.Button, so keyboard shortcuts can call it safely."""
+
+    def __init__(self, parent, text: str, command, *, parent_bg: str,
+                 bg: str, fg: str, hover_bg: str, hover_fg: str,
+                 off_bg: str, off_fg: str, font=None, padx: int = 14,
+                 pady: int = 6):
+        font = font or (FONT, 9, "bold")
+        f = tkfont.Font(font=font)
+        w = f.measure(text) + 2 * padx
+        h = f.metrics("linespace") + 2 * pady
+        super().__init__(parent, width=w, height=h, bg=parent_bg,
+                         highlightthickness=0, bd=0)
+        self._command = command
+        self._colors = dict(bg=bg, fg=fg, hover_bg=hover_bg,
+                            hover_fg=hover_fg, off_bg=off_bg, off_fg=off_fg)
+        self._enabled = True
+        self._hover   = False
+        r = h // 2
+        x1, y1, x2, y2 = 1, 1, w - 1, h - 1
+        self._shape = self.create_polygon(
+            x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r, x2, y2 - r, x2, y2,
+            x2 - r, y2, x1 + r, y2, x1, y2, x1, y2 - r, x1, y1 + r, x1, y1,
+            smooth=True, outline="")
+        self._text = self.create_text(w // 2, h // 2, text=text, font=font)
+        self.bind("<Enter>", lambda _: self._set_hover(True))
+        self.bind("<Leave>", lambda _: self._set_hover(False))
+        self.bind("<ButtonRelease-1>", lambda _: self.invoke())
+        self._paint()
+
+    @property
+    def enabled(self) -> bool:
+        return self._enabled
+
+    def set_enabled(self, enabled: bool):
+        self._enabled = enabled
+        self._paint()
+
+    def invoke(self):
+        if self._enabled:
+            self._command()
+
+    def _set_hover(self, hover: bool):
+        self._hover = hover
+        self._paint()
+
+    def _paint(self):
+        c = self._colors
+        if not self._enabled:
+            bg, fg, cursor = c["off_bg"], c["off_fg"], ""
+        elif self._hover:
+            bg, fg, cursor = c["hover_bg"], c["hover_fg"], "hand2"
+        else:
+            bg, fg, cursor = c["bg"], c["fg"], "hand2"
+        self.itemconfig(self._shape, fill=bg)
+        self.itemconfig(self._text, fill=fg)
+        self.config(cursor=cursor)
+
+
+# ─── ReplayWindow ────────────────────────────────────────────────────────────
+
+class ReplayWindow(tk.Toplevel):
+    """Plays back the last few seconds of the feed at their real speed."""
+
+    def __init__(self, app: "HawkSightApp", frames: list):
+        super().__init__(app)
+        self.title(f"HawkSight — Replay (last {REPLAY_SECONDS} seconds)")
+        self.configure(bg=app.BG)
+        self.geometry("960x640")
+        self.minsize(480, 360)
+        self.transient(app)
+        self._app       = app
+        self._frames    = frames
+        self._i         = 0
+        self._after_id: Optional[str] = None
+        self._length    = frames[-1][0] if frames else 0.0
+
+        canvas = tk.Canvas(self, bg="#1a1a1c", highlightthickness=0)
+        canvas.pack(fill=tk.BOTH, expand=True, padx=app.S3, pady=(app.S3, 0))
+        self._canvas  = canvas
+        self._display = DisplayManager(canvas)
+
+        bar = tk.Frame(self, bg=app.BG)
+        bar.pack(fill=tk.X, padx=app.S3, pady=app.S3)
+        self._sv_time = tk.StringVar()
+        tk.Label(bar, textvariable=self._sv_time, font=(MONO, 11, "bold"),
+                 bg=app.BG, fg=app.FG).pack(side=tk.LEFT)
+        self._progress = tk.Canvas(bar, height=6, bg=app.CARD_BG,
+                                   highlightthickness=0)
+        self._progress.pack(side=tk.LEFT, fill=tk.X, expand=True,
+                            padx=app.S3)
+        self._bar = self._progress.create_rectangle(0, 0, 0, 6,
+                                                    fill=app.ORANGE, width=0)
+        pill = dict(parent_bg=app.BG, off_bg=app.CARD_BG, off_fg=app.FG_DIM)
+        PillButton(bar, "✕  Close", self.close, bg=app.CARD_BG, fg=app.FG,
+                   hover_bg=app.SEP, hover_fg="white", **pill
+                   ).pack(side=tk.RIGHT)
+        self.btn_again = PillButton(
+            bar, "↻  Play again", self.play, bg=app.ORANGE, fg="white",
+            hover_bg=app.ORANGE_LT, hover_fg="white", **pill)
+        self.btn_again.pack(side=tk.RIGHT, padx=(0, app.S2))
+
+        self.protocol("WM_DELETE_WINDOW", self.close)
+        self.bind("<Escape>", lambda _: self.close())
+        self.after(50, self.play)
+
+    def play(self):
+        if self._after_id:
+            self.after_cancel(self._after_id)
+        self._i = 0
+        self._show_next()
+
+    def _show_next(self):
+        t, frame = self._frames[self._i]
+        w = self._canvas.winfo_width() or 800
+        h = self._canvas.winfo_height() or 500
+        self._display.render(
+            self._app._processor.resize_for_display(frame, w, h))
+        self._sv_time.set(f"{int(t) // 60}:{int(t) % 60:02d} / "
+                          f"{int(self._length) // 60}:{int(self._length) % 60:02d}")
+        pw = self._progress.winfo_width()
+        done = t / self._length if self._length else 1.0
+        self._progress.coords(self._bar, 0, 0, pw * done, 6)
+        self._i += 1
+        if self._i < len(self._frames):
+            # Same gap as when it was recorded (kept between 15 ms and 1 s).
+            gap = self._frames[self._i][0] - t
+            self._after_id = self.after(int(min(max(gap, 0.015), 1.0) * 1000),
+                                        self._show_next)
+        else:
+            self._after_id = None
+
+    @property
+    def finished(self) -> bool:
+        return self._i >= len(self._frames)
+
+    def close(self):
+        if self._after_id:
+            self.after_cancel(self._after_id)
+            self._after_id = None
+        self.destroy()
+
+
 # ─── HawkSightApp ─────────────────────────────────────────────────────────────
 
 class HawkSightApp(tk.Tk):
@@ -206,6 +355,8 @@ class HawkSightApp(tk.Tk):
         self._is_fullscreen = False
         self._idle_msg: Optional[tuple] = None   # None = "Ready!" placeholder
         self._status_id: Optional[str] = None    # pending status-bar restore
+        self._replay = ReplayBuffer(seconds=REPLAY_SECONDS)
+        self._replay_win: Optional[ReplayWindow] = None
 
         self._load_icon()
         self._init_styles()
@@ -276,9 +427,9 @@ class HawkSightApp(tk.Tk):
         for key, button in (("s", self._btn_start), ("x", self._btn_stop)):
             for k in (key, key.upper()):
                 self.bind(f"<{k}>", lambda _, b=button: b.invoke())
-        # There is no photo button; P takes one while the camera is on.
-        for k in ("p", "P"):
-            self.bind(f"<{k}>", lambda _: self._on_photo_key())
+        for key, button in (("p", self._btn_shot), ("r", self._btn_replay)):
+            for k in (key, key.upper()):
+                self.bind(f"<{k}>", lambda _, b=button: b.invoke())
         self.bind("<F9>", lambda _: self._toggle_fullscreen())
         self.bind("<Escape>", lambda _: self._exit_fullscreen())
 
@@ -343,6 +494,22 @@ class HawkSightApp(tk.Tk):
         right = tk.Frame(inner, bg=self.HEADER)
         right.pack(side=tk.RIGHT)
 
+        # Middle: Screenshot and Replay, centred in the space that is left.
+        tools = tk.Frame(inner, bg=self.HEADER)
+        tools.pack(side=tk.LEFT, expand=True)
+        pill = dict(parent_bg=self.HEADER, bg=self.CARD_BG, fg=self.FG,
+                    hover_bg=self.ORANGE, hover_fg="white",
+                    off_bg=self.PANEL, off_fg="#77777a",
+                    font=(FONT, 10, "bold"), padx=18, pady=8)
+        self._btn_shot = PillButton(tools, "◉  Screenshot",
+                                    self._on_snapshot, **pill)
+        self._btn_shot.pack(side=tk.LEFT, padx=(0, S3))
+        self._btn_replay = PillButton(
+            tools, f"⏪  Replay last {REPLAY_SECONDS}s", self._on_replay, **pill)
+        self._btn_replay.pack(side=tk.LEFT)
+        self._btn_shot.set_enabled(False)
+        self._btn_replay.set_enabled(False)
+
         fps_blk = tk.Frame(right, bg=self.HEADER)
         fps_blk.pack(side=tk.LEFT, padx=(0, S4 * 2))
         tk.Label(fps_blk, text="FPS", font=(FONT, 8, "bold"),
@@ -378,7 +545,7 @@ class HawkSightApp(tk.Tk):
         )
 
         tk.Label(bar,
-                 text="Keys:   S = Start    X = Stop    P = Take a photo    F9 = Full screen",
+                 text="Keys:   S = Start    X = Stop    P = Screenshot    R = Replay    F9 = Full screen",
                  font=(FONT, 9), bg=self.HEADER,
                  fg=self.FG_DIM).pack(side=tk.LEFT, padx=S4 * 2)
 
@@ -709,6 +876,9 @@ class HawkSightApp(tk.Tk):
             )
             self._sv_status.set("Watching")
             self._badge.config(text="● ON", fg=self.GREEN)
+            self._replay.clear()
+            self._btn_replay.set_enabled(False)
+            self._btn_shot.set_enabled(True)
             self._reset_alert()
             self._last_log_count = -1
             self._last_log_time  = 0.0
@@ -742,6 +912,7 @@ class HawkSightApp(tk.Tk):
         self._show_idle("Stopped", "Press START to watch again.")
         self._btn_stop.config(state=tk.DISABLED,
                               bg=self.BTN_OFF_BG, fg=self.BTN_OFF_FG)
+        self._btn_shot.set_enabled(False)
         self._btn_start.config(state=tk.NORMAL)
         self._cmb_model.config(state="readonly")
         self._sv_status.set("Stopped")
@@ -753,9 +924,15 @@ class HawkSightApp(tk.Tk):
         self._log_write("── session ended ──", "div")
         self.title("HawkSight — Gas Cylinder Detection")
 
-    def _on_photo_key(self):
-        if self._controller.is_running:
-            self._on_snapshot()
+    def _on_replay(self):
+        frames = self._replay.frames()
+        if not frames:
+            return
+        if self._replay_win is not None and self._replay_win.winfo_exists():
+            self._replay_win.close()
+        self._replay_win = ReplayWindow(self, frames)
+        self._log_write(f"⏪ replaying the last {self._replay.duration:.0f} s",
+                        "div")
 
     def _flash_status(self, text: str, ms: int = 3000):
         """Show `text` in the status bar for a moment, then go back."""
@@ -783,10 +960,10 @@ class HawkSightApp(tk.Tk):
             n += 1
         if cv2.imwrite(str(path), self._last_frame):
             self._log_write(f"◎ {path.name}  saved", "snap")
-            self._flash_status(f"◎  Photo saved in the snapshots folder ({path.name})")
+            self._flash_status(f"◉  Screenshot saved in the snapshots folder ({path.name})")
         else:
             self._log_write(f"⚠  Could not save {path.name}", "warn")
-            self._flash_status("⚠  Could not save the photo")
+            self._flash_status("⚠  Could not save the screenshot")
 
     def _on_model_selected(self, _=None):
         key = next((k for k in self._model_keys
@@ -898,6 +1075,9 @@ class HawkSightApp(tk.Tk):
         if data is not None:
             frame, result = data
             self._last_frame = frame
+            self._replay.add(frame)
+            if not self._btn_replay.enabled:
+                self._btn_replay.set_enabled(True)
             w = self._canvas.winfo_width()
             h = self._canvas.winfo_height()
             resized = self._processor.resize_for_display(

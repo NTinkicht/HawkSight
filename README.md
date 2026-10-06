@@ -99,11 +99,18 @@ the desktop app with the `.venv` Python.
 |-----|--------|
 | `S` | Start |
 | `X` | Stop |
-| `P` | Take a photo while the camera is on, saved to `snapshots/` (git-ignored) |
+| `P` | Screenshot while the camera is on, saved to `snapshots/` (git-ignored) |
+| `R` | Replay the last 15 seconds |
 | `F9` | Toggle full screen |
 | `Esc` | Exit full screen |
 
-There is no photo button; use `P`. The status bar at the bottom confirms each photo.
+Two buttons at the top of the window:
+- **◉ Screenshot** saves the current frame (with its boxes) to `snapshots/`.
+  It works while the camera is on, and the status bar confirms each save.
+- **⏪ Replay last 15s** opens a window that plays back the last 15 seconds at
+  their real speed, with **Play again** and **Close**. It still works after STOP
+  and starts fresh on the next START. The replay keeps only the frames the
+  detector processed, so on a slow PC (low FPS) it will look choppy.
 
 The sidebar has these parts, from the top:
 - **Light + How sure:** a small light that blinks red while a gas cylinder is

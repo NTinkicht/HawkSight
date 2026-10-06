@@ -8,8 +8,8 @@ import numpy as np
 
 from src import core
 from src.core import (
-    DetectionModel, DetectionResult, FrameProcessor, SystemController,
-    VideoSource,
+    DetectionModel, DetectionResult, FrameProcessor, ReplayBuffer,
+    SystemController, VideoSource,
 )
 
 FRAME = np.zeros((20, 20, 3), dtype=np.uint8)
@@ -59,6 +59,40 @@ class AnnotateTest(unittest.TestCase):
         self.assertTrue(g > 150 and b == 0 and r == 0, (b, g, r))
         b, g, r = (int(c) for c in out[38, 21])        # label background
         self.assertTrue(g > 100 and b == 0 and r == 0, (b, g, r))
+
+
+class ReplayBufferTest(unittest.TestCase):
+    def test_keeps_only_the_last_n_seconds(self):
+        buf = ReplayBuffer(seconds=15)
+        for t in range(31):                      # one frame a second for 30 s
+            buf.add(np.full((10, 10, 3), t, np.uint8), t=float(t))
+        self.assertEqual(len(buf), 16)           # t = 15 .. 30
+        self.assertEqual(buf.duration, 15.0)
+        times = [t for t, _ in buf.frames()]
+        self.assertEqual(times[0], 0.0)
+        self.assertEqual(times[-1], 15.0)
+
+    def test_frames_come_back_in_order_and_close_to_the_original(self):
+        buf = ReplayBuffer()
+        for t, value in enumerate((40, 120, 200)):
+            buf.add(np.full((20, 20, 3), value, np.uint8), t=t * 0.1)
+        values = [int(f.mean()) for _, f in buf.frames()]
+        for got, want in zip(values, (40, 120, 200)):
+            self.assertAlmostEqual(got, want, delta=3)   # JPEG is lossy
+
+    def test_large_frames_are_shrunk(self):
+        buf = ReplayBuffer()
+        buf.add(np.zeros((720, 1280, 3), np.uint8), t=0.0)
+        (_, frame), = buf.frames()
+        self.assertEqual(frame.shape, (540, 960, 3))
+
+    def test_clear_and_empty(self):
+        buf = ReplayBuffer()
+        self.assertEqual(buf.frames(), [])
+        self.assertEqual(buf.duration, 0.0)
+        buf.add(np.zeros((10, 10, 3), np.uint8))
+        buf.clear()
+        self.assertEqual(len(buf), 0)
 
 
 class ConfidenceLimitTest(unittest.TestCase):

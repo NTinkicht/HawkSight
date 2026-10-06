@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import threading
 import time
@@ -516,6 +517,7 @@ class HawkSightApp(tk.Tk):
         sb.pack(side=tk.RIGHT, fill=tk.Y)
         sb.pack_propagate(False)
 
+        self._build_shot_preview(sb)
         self._build_indicator(sb)
         self._build_controls(self._section(sb, "Camera on / off"))
         self._build_log(sb)
@@ -647,6 +649,53 @@ class HawkSightApp(tk.Tk):
             self._lbl_loading.pack(anchor=tk.W, pady=(self.S1, 0))
         else:
             self._lbl_loading.pack_forget()
+
+    # ── Last screenshot preview ───────────────────────────────────────────────
+
+    def _build_shot_preview(self, parent):
+        self._shot_box = tk.Frame(parent, bg=self.PANEL)
+        self._shot_box.pack(side=tk.BOTTOM, fill=tk.X,
+                            padx=self.S3, pady=(0, self.S3))
+        self._shot_path: Optional[Path] = None
+        self._shot_photo: Optional[ImageTk.PhotoImage] = None
+        self._shot_widgets_built = False
+
+    def _show_last_shot(self, path: Path, frame: np.ndarray):
+        S1, S2 = self.S1, self.S2
+        if not self._shot_widgets_built:
+            head = tk.Frame(self._shot_box, bg=self.PANEL)
+            head.pack(fill=tk.X, pady=(self.S3, S2))
+            tk.Label(head, text="LAST SCREENSHOT", font=(FONT, 8, "bold"),
+                     bg=self.PANEL, fg=self.FG_DIM).pack(side=tk.LEFT)
+            self._lbl_shot_time = tk.Label(head, font=(FONT, 8),
+                                           bg=self.PANEL, fg=self.FG_DIM)
+            self._lbl_shot_time.pack(side=tk.RIGHT)
+            # Thin orange frame around the picture; click to open it.
+            ring = tk.Frame(self._shot_box, bg=self.ORANGE)
+            ring.pack()
+            self._lbl_shot = tk.Label(ring, bg=self.CARD_BG, bd=0,
+                                      cursor="hand2")
+            self._lbl_shot.pack(padx=2, pady=2)
+            self._lbl_shot.bind("<Button-1>", lambda _: self._open_last_shot())
+            tk.Label(self._shot_box, text="Click the picture to open it",
+                     font=(FONT, 8), bg=self.PANEL,
+                     fg=self.FG_DIM).pack(pady=(S1, 0))
+            self._shot_widgets_built = True
+
+        width = max(self.SIDEBAR_W - 2 * self.S3 - 4, 80)
+        h, w = frame.shape[:2]
+        thumb = cv2.resize(frame, (width, max(h * width // w, 1)),
+                           interpolation=cv2.INTER_AREA)
+        img = Image.fromarray(cv2.cvtColor(thumb, cv2.COLOR_BGR2RGB))
+        self._shot_photo = ImageTk.PhotoImage(img)   # keep a reference
+        self._lbl_shot.config(image=self._shot_photo)
+        self._lbl_shot_time.config(text=datetime.now().strftime("%H:%M:%S"))
+        self._shot_path = path
+
+    def _open_last_shot(self):
+        if self._shot_path and self._shot_path.exists() \
+                and hasattr(os, "startfile"):
+            os.startfile(self._shot_path)   # opens in the Windows Photos app
 
     # ── Detection log ─────────────────────────────────────────────────────────
 
@@ -957,6 +1006,7 @@ class HawkSightApp(tk.Tk):
             n += 1
         if cv2.imwrite(str(path), self._last_frame):
             self._log_write(f"◎ {path.name}  saved", "snap")
+            self._show_last_shot(path, self._last_frame)
             self._flash_status(f"◉  Screenshot saved in the snapshots folder ({path.name})")
         else:
             self._log_write(f"⚠  Could not save {path.name}", "warn")

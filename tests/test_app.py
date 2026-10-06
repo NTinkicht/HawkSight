@@ -360,6 +360,21 @@ class HeaderButtonsTest(AppTestCase):
         self.assertFalse(self.app.replaying)
         self.assertEqual(self.app._btn_continue.winfo_manager(), "")
 
+    def test_screenshot_shows_in_the_sidebar_and_opens_on_click(self):
+        self.start_and_wait_for_frames(1)
+        self.assertIsNone(self.app._shot_path)
+        self.app._btn_shot.invoke()
+        self.app.update()
+        saved, = self.snap_dir.glob("*.jpg")
+        self.assertEqual(self.app._shot_path, saved)
+        self.assertTrue(self.app._lbl_shot.winfo_ismapped())
+        self.assertEqual(self.app._shot_photo.width(),
+                         self.app.SIDEBAR_W - 2 * self.app.S3 - 4)
+        with mock.patch.object(hawksight_app.os, "startfile", create=True) as op:
+            self.app._lbl_shot.event_generate("<Button-1>")
+            self.app.update()
+        op.assert_called_once_with(saved)
+
     def test_screenshot_button_saves_while_camera_is_on(self):
         self.start_and_wait_for_frames(1)
         self.assertTrue(self.app._btn_shot.enabled)

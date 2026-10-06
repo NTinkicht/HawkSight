@@ -108,6 +108,8 @@ the desktop app with the `.venv` Python.
 Two buttons at the top of the window:
 - **◉ Screenshot** saves the current frame (with its boxes) to `snapshots/`.
   It works while the camera is on, and the status bar confirms each save.
+  The newest screenshot also appears at the bottom of the sidebar under
+  **LAST SCREENSHOT**, with the time it was taken; click it to open the picture.
 - **⏪ Replay last 15s** plays the last 15 seconds in the main video area, at
   their real speed, with a red "REPLAY 0:05 / 0:15" tag. It loops until you
   press the big green **▶ CONTINUE LIVE** button that appears in the sidebar

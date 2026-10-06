@@ -61,16 +61,21 @@ def run(source: int | str, model_path: str, conf: float) -> None:
     print("Running. Press Q in the window to quit.\n")
 
     try:
-        while controller.is_running:
+        while True:
+            # Check before polling: once the stream has ended and the queue is
+            # empty, no more frames can arrive. Frames still queued when the
+            # stream ends are shown first instead of being dropped.
+            running = controller.is_running
             data = controller.poll_frame()
             if data is not None:
                 annotated, result = data
                 _draw_status(annotated, result.count, controller.fps)
                 cv2.imshow(WINDOW, annotated)
+            elif not running:
+                print("Stream ended.")
+                break
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
-        else:
-            print("Stream ended.")
     finally:
         controller.stop()
         cv2.destroyAllWindows()

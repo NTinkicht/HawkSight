@@ -69,6 +69,22 @@ class CliTest(unittest.TestCase):
         shown = self.run_cli(SystemController.MIN_CONSECUTIVE + 20)
         self.assertIn(1, shown)
 
+    def test_frames_still_queued_when_the_video_ends_are_shown(self):
+        # Display slower than the video: the stream ends while processed
+        # frames are still waiting. They must be shown, not dropped.
+        shown = []
+        with mock.patch.object(hawksight, "VideoSource",
+                               lambda src: FakeVideo(3)), \
+             mock.patch.object(hawksight, "DetectionModel", FakeModel), \
+             mock.patch.object(hawksight, "_draw_status",
+                               lambda f, n, fps: shown.append(n)), \
+             mock.patch.object(hawksight.cv2, "imshow"), \
+             mock.patch.object(hawksight.cv2, "waitKey",
+                               side_effect=lambda _: time.sleep(0.2) or -1), \
+             mock.patch.object(hawksight.cv2, "destroyAllWindows"):
+            hawksight.run(source=0, model_path="fake.pt", conf=0.5)
+        self.assertGreaterEqual(len(shown), 2, "queued frames were dropped")
+
     def test_cli_defaults_match_the_app(self):
         args = hawksight.parse_args([])
         self.assertEqual(args.conf, core.DEFAULT_CONF)

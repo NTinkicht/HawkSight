@@ -221,11 +221,11 @@ class PillButton(tk.Canvas):
 
 class HawkSightApp(tk.Tk):
     # ── Palette — "Soft Dark" (easy on the eyes) ─────────────────────────────
-    BG        = "#121214"   # near-black, not pure black
-    HEADER    = "#18181a"
-    PANEL     = "#1c1c1e"
-    CARD_BG   = "#252527"
-    SEP       = "#323234"
+    BG        = "#0c0c0e"   # near-black, not pure black
+    HEADER    = "#111113"
+    PANEL     = "#151517"
+    CARD_BG   = "#1e1e20"
+    SEP       = "#2a2a2c"
     ORANGE    = "#e07818"   # softer, less saturated than #ff6b00
     ORANGE_LT = "#e89830"
     ORANGE_DK = "#a85e10"
@@ -239,10 +239,9 @@ class HawkSightApp(tk.Tk):
     FG_MID    = "#b4b4b4"   # secondary text, ~7:1 on PANEL
     FG_DIM    = "#9a9a9a"   # labels and hints, >= 4.5:1 on PANEL and CARD_BG
 
-    # START / STOP: the button for the current state "breathes" between two
-    # bright shades; the other one is dimmed.
-    GLOW = {"start": ("#34d27b", "#1f9a57"), "stop": ("#ef5545", "#a8301f")}
-    DIM  = {"start": ("#173626", "#6fae8a"), "stop": ("#3a1c1a", "#b0706a")}
+    # START / STOP: the button you can press next is lit; the other is dark.
+    LIT  = {"start": "#2ecc71", "stop": "#e74c3c"}
+    DARK = {"start": ("#0e2016", "#4d7d62"), "stop": ("#241010", "#85514c")}
 
     # Spacing scale (px): every gap in the layout is one of these.
     S1, S2, S3, S4 = 4, 8, 12, 16
@@ -506,7 +505,7 @@ class HawkSightApp(tk.Tk):
         self._border.pack(fill=tk.BOTH, expand=True)
 
         self._canvas = tk.Canvas(
-            self._border, bg="#0e0e10", highlightthickness=0
+            self._border, bg="#09090a", highlightthickness=0
         )
         self._canvas.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
         self._canvas.bind("<Configure>", self._on_canvas_resize)
@@ -582,8 +581,7 @@ class HawkSightApp(tk.Tk):
             command=self._on_stop, state=tk.DISABLED, **cfg,
         )
         self._btn_stop.pack(fill=tk.X, pady=(self.S2, 0), ipady=self.S2)
-        self._glow_id: Optional[str] = None
-        self._set_power_look("idle")
+        self._set_power_look(running=False)
 
         # Loading indicator: only takes up space while a model is loading.
         self._lbl_loading = tk.Label(parent, text="", wraplength=240,
@@ -591,39 +589,14 @@ class HawkSightApp(tk.Tk):
                                      font=(FONT, 9, "italic"),
                                      bg=self.PANEL, fg=self.ORANGE_LT)
 
-    def _set_power_look(self, state: str):
-        """idle: START plain green, STOP dimmed (app just opened).
-        running: START glows green, STOP dimmed red.
-        stopped: STOP glows red, START dimmed green."""
-        self._power_state = state
-        if self._glow_id:
-            self.after_cancel(self._glow_id)
-            self._glow_id = None
+    def _set_power_look(self, running: bool):
+        """Camera on: STOP lit red, START dark. Camera off: START lit green,
+        STOP dark. Steady colours, no animation."""
         for name, btn in (("start", self._btn_start), ("stop", self._btn_stop)):
-            glowing = (state == "running" and name == "start") or \
-                      (state == "stopped" and name == "stop")
-            if glowing:
-                bg, fg = self.GLOW[name][0], "white"
-            elif state == "idle" and name == "start":
-                bg, fg = self.GREEN, "white"
-            else:
-                bg, fg = self.DIM[name]
+            lit = (name == "stop") == running
+            bg, fg = (self.LIT[name], "white") if lit else self.DARK[name]
             # Disabled buttons keep these colours instead of greying out.
             btn.config(bg=bg, fg=fg, disabledforeground=fg)
-        if state in ("running", "stopped"):
-            self._glow_bright = True
-            self._glow_id = self.after(700, self._glow_step)
-
-    @property
-    def _glowing_button(self):
-        return self._btn_start if self._power_state == "running" else self._btn_stop
-
-    def _glow_step(self):
-        self._glow_bright = not self._glow_bright
-        name = "start" if self._power_state == "running" else "stop"
-        bright, soft = self.GLOW[name]
-        self._glowing_button.config(bg=bright if self._glow_bright else soft)
-        self._glow_id = self.after(700, self._glow_step)
 
     # ── Settings ──────────────────────────────────────────────────────────────
 
@@ -885,7 +858,7 @@ class HawkSightApp(tk.Tk):
         self._set_loading("")
         if ok:
             self._btn_stop.config(state=tk.NORMAL)
-            self._set_power_look("running")
+            self._set_power_look(running=True)
             self._sv_status.set("Watching")
             self._badge.config(text="● ON", fg=self.GREEN)
             self._replay.clear()
@@ -900,7 +873,7 @@ class HawkSightApp(tk.Tk):
             self._badge_id = self.after(900,  self._pulse_live_badge)
         else:
             self._btn_start.config(state=tk.NORMAL)
-            self._set_power_look("idle")
+            self._set_power_look(running=False)
             self._cmb_model.config(state="readonly")
             self._sv_status.set(status)
             self._badge.config(text="● PROBLEM", fg=self.RED)
@@ -932,7 +905,7 @@ class HawkSightApp(tk.Tk):
         self._controller.stop()
         self._show_idle("Stopped", "Press START to watch again.")
         self._btn_stop.config(state=tk.DISABLED)
-        self._set_power_look("stopped")
+        self._set_power_look(running=False)
         self._btn_shot.set_enabled(False)
         self._btn_start.config(state=tk.NORMAL)
         self._cmb_model.config(state="readonly")
@@ -1249,9 +1222,8 @@ class HawkSightApp(tk.Tk):
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     def on_close(self):
-        for after_id in (self._replay_id, self._glow_id):
-            if after_id:
-                self.after_cancel(after_id)
+        if self._replay_id:
+            self.after_cancel(self._replay_id)
         self._controller.stop()
         self.destroy()
 

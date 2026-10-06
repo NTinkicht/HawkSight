@@ -125,9 +125,9 @@ The sidebar has these parts, from the top:
 - **Light + How sure:** a small light that blinks red while a gas cylinder is
   spotted, next to how sure the detector is (for example 87 %). Grey means
   nothing is spotted or the camera is off.
-- **Camera on / off:** START and STOP. The button for the current state glows
-  (a slow pulse) and the other is dimmed: START glows green while the camera
-  is on, STOP glows red after you stop it.
+- **Camera on / off:** START and STOP. The button you can press next is lit
+  and the other is dark: while the camera is on, STOP is bright red; while it
+  is off, START is bright green.
 - **Show log:** hidden until clicked. Lists sightings, photos, detector and
   camera changes, and problems.
 

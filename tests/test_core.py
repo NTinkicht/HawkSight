@@ -49,6 +49,18 @@ class TotalCountTest(unittest.TestCase):
         self.assertEqual(ctrl.total_detections, 2)
 
 
+class AnnotateTest(unittest.TestCase):
+    def test_box_and_label_are_green(self):
+        frame  = np.zeros((100, 100, 3), dtype=np.uint8)
+        result = DetectionResult(boxes=[(20, 40, 80, 90)],
+                                 labels=["Gas Cylinder"], confidences=[0.9])
+        out = FrameProcessor().annotate(frame, result)
+        b, g, r = (int(c) for c in out[90, 50])        # bottom edge of box
+        self.assertTrue(g > 150 and b == 0 and r == 0, (b, g, r))
+        b, g, r = (int(c) for c in out[38, 21])        # label background
+        self.assertTrue(g > 100 and b == 0 and r == 0, (b, g, r))
+
+
 class ConfidenceLimitTest(unittest.TestCase):
     def test_constructor_clamps_confidence(self):
         self.assertEqual(DetectionModel(conf=2).conf, 0.95)

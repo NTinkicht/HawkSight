@@ -218,8 +218,8 @@ class DetectionModel:
 # ─── FrameProcessor ──────────────────────────────────────────────────────────
 
 class FrameProcessor:
-    BOX_COLOR = (0, 140, 255)   # BGR orange
-    TEXT_BG   = (0, 80,  180)
+    BOX_COLOR = (0, 220, 0)     # BGR green, bright enough to stand out
+    TEXT_BG   = (0, 130, 0)     # darker green so the white label text reads
     FONT      = cv2.FONT_HERSHEY_SIMPLEX
 
     def annotate(self, frame: np.ndarray, result: DetectionResult) -> np.ndarray:

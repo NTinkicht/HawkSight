@@ -111,7 +111,7 @@ The sidebar shows:
   detection never works on old, buffered video.
 - Each frame goes through the model. A cylinder counts only after it has been
   seen in **5 frames in a row**, which filters out one-frame false alarms.
-- Confirmed cylinders get an orange box and confidence label, and the alert
+- Confirmed cylinders get a green box and confidence label, and the alert
   banner and video border pulse.
 - If the model fails to load or the camera can't open, the app shows the error
   and the reason in the log, and START works again.

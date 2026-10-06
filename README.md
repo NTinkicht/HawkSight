@@ -29,9 +29,14 @@ It uses a YOLO object-detection model and comes in two forms:
 | Classes | 1: `gas_cylinder` |
 | Accuracy | **71.6% mAP50-95** on a held-out test set |
 
-The app shows each detection as "Gas Cylinder". If `hawksight_custom.pt` is
-missing, the app falls back to stock `yolov8n.pt`, using the COCO "bottle" class
-as a rough stand-in.
+The app shows each detection as "Gas Cylinder". You can also run the stock
+**YOLOv8n** model (`yolov8n.pt`), which uses the COCO "bottle" class as a rough
+stand-in for cylinders. It is also the fallback when `hawksight_custom.pt` is missing.
+
+`yolov8n.pt` is not stored in the repo. The first time you start with YOLOv8n,
+HawkSight downloads it (about 6 MB) from the official Ultralytics GitHub release
+and shows "Downloading yolov8n.pt…". This needs an internet connection once; if the
+download fails, the log says so and START works again.
 
 ## Setup (once)
 

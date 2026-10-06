@@ -588,10 +588,18 @@ class HawkSightApp(tk.Tk):
         self._btn_model_yolo.config(state=tk.DISABLED)
         if CUSTOM_PT.exists():
             self._btn_model_custom.config(state=tk.DISABLED)
-        self._sv_status.set("Loading model…")
-        self._lbl_loading.config(
-            text=f"Loading {MODEL_LABELS[self._model_key]} weights…"
-        )
+        if self._model.is_loaded or MODEL_PATHS[self._model_key].exists():
+            self._sv_status.set("Loading model…")
+            self._lbl_loading.config(
+                text=f"Loading {MODEL_LABELS[self._model_key]} weights…"
+            )
+        else:
+            name = MODEL_PATHS[self._model_key].name
+            self._sv_status.set("Downloading model…")
+            self._lbl_loading.config(
+                text=f"Downloading {name} (first use only, about 6 MB)…"
+            )
+            self._log_write(f"◆ {name} not found, downloading it once…", "div")
 
         try:
             src = int(self._sv_source.get())
@@ -610,12 +618,18 @@ class HawkSightApp(tk.Tk):
     def _load_and_start(self):
         # Runs on a worker thread: never touch tkinter here, only store the
         # result for _wait_for_start to pick up on the main thread.
+        path = MODEL_PATHS[self._model_key]
+        downloading = not self._model.is_loaded and not path.exists()
         try:
             if not self._model.is_loaded:
                 self._model.load()
         except Exception as exc:
-            self._start_result = (False, "Model error",
-                                  f"⚠  Could not load model: {exc}")
+            if downloading:
+                message = (f"⚠  Could not download {path.name}. Check the "
+                           f"internet connection and press START again. ({exc})")
+            else:
+                message = f"⚠  Could not load model: {exc}"
+            self._start_result = (False, "Model error", message)
             return
         if self._controller.start():
             self._start_result = (True, "", "")
@@ -710,7 +724,8 @@ class HawkSightApp(tk.Tk):
         if key == self._model_key or self._controller.is_running:
             return
         path = MODEL_PATHS[key]
-        if not path.exists():
+        # Stock weights are downloaded on first use; the custom model can't be.
+        if not path.exists() and key != "yolo":
             return
         self._model_key = key
         self._model.switch(path)

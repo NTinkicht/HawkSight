@@ -48,6 +48,8 @@ def run(source: int | str, model_path: str, conf: float) -> None:
     controller = SystemController(VideoSource(source), model,
                                   FrameProcessor(), stop_on_end=True)
 
+    if not Path(model_path).exists():
+        print(f"{Path(model_path).name} not found, downloading it once…")
     print(f"Loading model: {model_path}")
     model.load()
     print("Model loaded. Opening camera/source…")

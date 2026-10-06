@@ -61,6 +61,42 @@ class ModelLoadFailureTest(AppTestCase):
         self.assertFalse(self.app._controller.is_running)
 
 
+class StockModelTest(AppTestCase):
+    """YOLOv8n stays selectable when yolov8n.pt hasn't been downloaded yet."""
+
+    def setUp(self):
+        super().setUp()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.missing = Path(tmp.name) / "yolov8n.pt"
+        paths = dict(hawksight_app.MODEL_PATHS, yolo=self.missing)
+        patcher = mock.patch.object(hawksight_app, "MODEL_PATHS", paths)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.app._model_key = "custom"
+
+    def test_yolo_can_be_chosen_before_it_is_downloaded(self):
+        self.app._on_model_switch("yolo")
+        self.assertEqual(self.app._model_key, "yolo")
+        self.assertEqual(self.app._model._model_path, str(self.missing))
+
+    def test_failed_download_says_so(self):
+        self.app._on_model_switch("yolo")
+
+        def offline_load():
+            raise ConnectionError("no internet")
+        self.app._model.load = offline_load
+
+        self.app._on_start()
+        self.assertIn("downloading", self.app._sv_status.get().lower())
+        recovered = _pump_until(
+            self.app, lambda: str(self.app._btn_start["state"]) == tk.NORMAL)
+
+        self.assertTrue(recovered, "START button stayed disabled")
+        self.assertIn("Could not download yolov8n.pt", self.log_text())
+        self.assertIn("internet connection", self.log_text())
+
+
 class SnapshotTest(AppTestCase):
     def setUp(self):
         super().setUp()

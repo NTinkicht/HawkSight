@@ -101,24 +101,27 @@ the desktop app with the `.venv` Python.
 | `X` | Stop |
 | `P` | Screenshot while the camera is on, saved to `snapshots/` (git-ignored) |
 | `R` | Replay the last 15 seconds |
+| `C` | Continue live (end the replay) |
 | `F9` | Toggle full screen |
 | `Esc` | Exit full screen |
 
 Two buttons at the top of the window:
 - **◉ Screenshot** saves the current frame (with its boxes) to `snapshots/`.
   It works while the camera is on, and the status bar confirms each save.
-- **⏪ Replay last 15s** opens a window that plays back the last 15 seconds at
-  their real speed, with **Play again** and **Close**. It still works after STOP
-  and starts fresh on the next START. The replay keeps only the frames the
+- **⏪ Replay last 15s** plays the last 15 seconds in the main video area, at
+  their real speed, with a red "REPLAY 0:05 / 0:15" tag. It loops until you
+  press the green **▶ Continue live** button that appears next to it (or `C`).
+  Detection keeps running in the background during a replay. Replay still works
+  after STOP and starts fresh on the next START. It keeps only the frames the
   detector processed, so on a slow PC (low FPS) it will look choppy.
 
 The sidebar has these parts, from the top:
+- **Settings:** **What to look for**, **Camera** with **⟳ Find cameras**, and
+  **How sure before it alerts**.
 - **Light + How sure:** a small light that blinks red while a gas cylinder is
   spotted, next to how sure the detector is (for example 87 %). Grey means
   nothing is spotted or the camera is off.
 - **Camera on / off:** START and STOP.
-- **Settings:** **What to look for**, **Camera** with **⟳ Find cameras**, and
-  **How sure before it alerts**.
 - **Show log:** hidden until clicked. Lists sightings, photos, detector and
   camera changes, and problems.
 

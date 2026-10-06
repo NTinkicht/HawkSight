@@ -216,90 +216,6 @@ class PillButton(tk.Canvas):
         self.config(cursor=cursor)
 
 
-# ─── ReplayWindow ────────────────────────────────────────────────────────────
-
-class ReplayWindow(tk.Toplevel):
-    """Plays back the last few seconds of the feed at their real speed."""
-
-    def __init__(self, app: "HawkSightApp", frames: list):
-        super().__init__(app)
-        self.title(f"HawkSight — Replay (last {REPLAY_SECONDS} seconds)")
-        self.configure(bg=app.BG)
-        self.geometry("960x640")
-        self.minsize(480, 360)
-        self.transient(app)
-        self._app       = app
-        self._frames    = frames
-        self._i         = 0
-        self._after_id: Optional[str] = None
-        self._length    = frames[-1][0] if frames else 0.0
-
-        canvas = tk.Canvas(self, bg="#1a1a1c", highlightthickness=0)
-        canvas.pack(fill=tk.BOTH, expand=True, padx=app.S3, pady=(app.S3, 0))
-        self._canvas  = canvas
-        self._display = DisplayManager(canvas)
-
-        bar = tk.Frame(self, bg=app.BG)
-        bar.pack(fill=tk.X, padx=app.S3, pady=app.S3)
-        self._sv_time = tk.StringVar()
-        tk.Label(bar, textvariable=self._sv_time, font=(MONO, 11, "bold"),
-                 bg=app.BG, fg=app.FG).pack(side=tk.LEFT)
-        self._progress = tk.Canvas(bar, height=6, bg=app.CARD_BG,
-                                   highlightthickness=0)
-        self._progress.pack(side=tk.LEFT, fill=tk.X, expand=True,
-                            padx=app.S3)
-        self._bar = self._progress.create_rectangle(0, 0, 0, 6,
-                                                    fill=app.ORANGE, width=0)
-        pill = dict(parent_bg=app.BG, off_bg=app.CARD_BG, off_fg=app.FG_DIM)
-        PillButton(bar, "✕  Close", self.close, bg=app.CARD_BG, fg=app.FG,
-                   hover_bg=app.SEP, hover_fg="white", **pill
-                   ).pack(side=tk.RIGHT)
-        self.btn_again = PillButton(
-            bar, "↻  Play again", self.play, bg=app.ORANGE, fg="white",
-            hover_bg=app.ORANGE_LT, hover_fg="white", **pill)
-        self.btn_again.pack(side=tk.RIGHT, padx=(0, app.S2))
-
-        self.protocol("WM_DELETE_WINDOW", self.close)
-        self.bind("<Escape>", lambda _: self.close())
-        self.after(50, self.play)
-
-    def play(self):
-        if self._after_id:
-            self.after_cancel(self._after_id)
-        self._i = 0
-        self._show_next()
-
-    def _show_next(self):
-        t, frame = self._frames[self._i]
-        w = self._canvas.winfo_width() or 800
-        h = self._canvas.winfo_height() or 500
-        self._display.render(
-            self._app._processor.resize_for_display(frame, w, h))
-        self._sv_time.set(f"{int(t) // 60}:{int(t) % 60:02d} / "
-                          f"{int(self._length) // 60}:{int(self._length) % 60:02d}")
-        pw = self._progress.winfo_width()
-        done = t / self._length if self._length else 1.0
-        self._progress.coords(self._bar, 0, 0, pw * done, 6)
-        self._i += 1
-        if self._i < len(self._frames):
-            # Same gap as when it was recorded (kept between 15 ms and 1 s).
-            gap = self._frames[self._i][0] - t
-            self._after_id = self.after(int(min(max(gap, 0.015), 1.0) * 1000),
-                                        self._show_next)
-        else:
-            self._after_id = None
-
-    @property
-    def finished(self) -> bool:
-        return self._i >= len(self._frames)
-
-    def close(self):
-        if self._after_id:
-            self.after_cancel(self._after_id)
-            self._after_id = None
-        self.destroy()
-
-
 # ─── HawkSightApp ─────────────────────────────────────────────────────────────
 
 class HawkSightApp(tk.Tk):
@@ -357,7 +273,10 @@ class HawkSightApp(tk.Tk):
         self._idle_msg: Optional[tuple] = None   # None = "Ready!" placeholder
         self._status_id: Optional[str] = None    # pending status-bar restore
         self._replay = ReplayBuffer(seconds=REPLAY_SECONDS)
-        self._replay_win: Optional[ReplayWindow] = None
+        # Replay plays in the main video area until "Continue live".
+        self._replay_frames: Optional[list] = None
+        self._replay_i  = 0
+        self._replay_id: Optional[str] = None
 
         self._load_icon()
         self._init_styles()
@@ -428,7 +347,8 @@ class HawkSightApp(tk.Tk):
         for key, button in (("s", self._btn_start), ("x", self._btn_stop)):
             for k in (key, key.upper()):
                 self.bind(f"<{k}>", lambda _, b=button: b.invoke())
-        for key, button in (("p", self._btn_shot), ("r", self._btn_replay)):
+        for key, button in (("p", self._btn_shot), ("r", self._btn_replay),
+                            ("c", self._btn_continue)):
             for k in (key, key.upper()):
                 self.bind(f"<{k}>", lambda _, b=button: b.invoke())
         self.bind("<F9>", lambda _: self._toggle_fullscreen())
@@ -508,6 +428,13 @@ class HawkSightApp(tk.Tk):
         self._btn_replay = PillButton(
             tools, f"⏪  Replay last {REPLAY_SECONDS}s", self._on_replay, **pill)
         self._btn_replay.pack(side=tk.LEFT)
+        # Shown only while a replay is playing.
+        self._btn_continue = PillButton(
+            tools, "▶  Continue live", self._on_continue,
+            parent_bg=self.HEADER, bg=self.GREEN, fg="white",
+            hover_bg=self.GREEN_DK, hover_fg="white",
+            off_bg=self.PANEL, off_fg="#77777a",
+            font=(FONT, 10, "bold"), padx=18, pady=8)
         self._btn_shot.set_enabled(False)
         self._btn_replay.set_enabled(False)
 
@@ -546,7 +473,7 @@ class HawkSightApp(tk.Tk):
         )
 
         tk.Label(bar,
-                 text="Keys:   S = Start    X = Stop    P = Screenshot    R = Replay    F9 = Full screen",
+                 text="Keys:   S = Start    X = Stop    P = Screenshot    R = Replay    C = Continue live    F9 = Full screen",
                  font=(FONT, 9), bg=self.HEADER,
                  fg=self.FG_DIM).pack(side=tk.LEFT, padx=S4 * 2)
 
@@ -590,9 +517,9 @@ class HawkSightApp(tk.Tk):
         sb.pack(side=tk.RIGHT, fill=tk.Y)
         sb.pack_propagate(False)
 
+        self._build_settings(self._section(sb, "Settings"))
         self._build_indicator(sb)
         self._build_controls(self._section(sb, "Camera on / off"))
-        self._build_settings(self._section(sb, "Settings"))
         self._build_log(sb)
 
     def _section(self, parent, title: str) -> tk.Frame:
@@ -933,15 +860,71 @@ class HawkSightApp(tk.Tk):
         self._log_write("── session ended ──", "div")
         self.title("HawkSight — Gas Cylinder Detection")
 
+    @property
+    def replaying(self) -> bool:
+        return self._replay_frames is not None
+
     def _on_replay(self):
         frames = self._replay.frames()
         if not frames:
             return
-        if self._replay_win is not None and self._replay_win.winfo_exists():
-            self._replay_win.close()
-        self._replay_win = ReplayWindow(self, frames)
+        if self._replay_id:
+            self.after_cancel(self._replay_id)
+        self._replay_frames = frames
+        self._replay_i = 0
+        self._btn_continue.pack(side=tk.LEFT, padx=(self.S3, 0))
         self._log_write(f"⏪ replaying the last {self._replay.duration:.0f} s",
                         "div")
+        self._replay_step()
+
+    def _replay_step(self):
+        frames = self._replay_frames
+        t, frame = frames[self._replay_i]
+        length = frames[-1][0]
+        self._render(self._replay_overlay(frame, t, length))
+        self._replay_i += 1
+        if self._replay_i < len(frames):
+            # Same gap as when it was recorded (kept between 15 ms and 1 s).
+            gap = min(max(frames[self._replay_i][0] - t, 0.015), 1.0)
+        else:
+            self._replay_i = 0   # loop until "Continue live"
+            gap = 1.0
+        self._replay_id = self.after(int(gap * 1000), self._replay_step)
+
+    @staticmethod
+    def _replay_overlay(frame: np.ndarray, t: float, length: float) -> np.ndarray:
+        """Red "REPLAY m:ss / m:ss" tag in the top-left corner."""
+        out  = frame.copy()
+        tag  = (f"REPLAY  {int(t) // 60}:{int(t) % 60:02d} / "
+                f"{int(length) // 60}:{int(length) % 60:02d}")
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        scale = max(out.shape[1] / 1280, 0.4) * 0.8
+        (tw, th), _ = cv2.getTextSize(tag, font, scale, 2)
+        cv2.rectangle(out, (12, 12), (12 + tw + 20, 12 + th + 20),
+                      (40, 40, 200), -1)
+        cv2.putText(out, tag, (22, 22 + th), font, scale, (255, 255, 255), 2,
+                    cv2.LINE_AA)
+        return out
+
+    def _on_continue(self):
+        if not self.replaying:
+            return
+        if self._replay_id:
+            self.after_cancel(self._replay_id)
+            self._replay_id = None
+        self._replay_frames = None
+        self._btn_continue.pack_forget()
+        if self._controller.is_running:
+            if self._last_frame is not None:
+                self._render(self._last_frame)
+        else:
+            self._on_canvas_resize()
+
+    def _render(self, frame: np.ndarray):
+        w = self._canvas.winfo_width()
+        h = self._canvas.winfo_height()
+        self._display.render(
+            self._processor.resize_for_display(frame, w or 800, h or 500))
 
     def _flash_status(self, text: str, ms: int = 3000):
         """Show `text` in the status bar for a moment, then go back."""
@@ -1067,7 +1050,7 @@ class HawkSightApp(tk.Tk):
             self._model.conf = v
 
     def _on_canvas_resize(self, event=None):
-        if self._controller.is_running:
+        if self._controller.is_running or self.replaying:
             return
         if self._idle_msg is None:
             self._display.draw_placeholder()
@@ -1076,7 +1059,8 @@ class HawkSightApp(tk.Tk):
 
     def _show_idle(self, title: str, hint: str = "", color: str = "#a0a0a2"):
         self._idle_msg = (title, hint, color)
-        self._display.show_message(*self._idle_msg)
+        if not self.replaying:   # a replay keeps the screen until "Continue"
+            self._display.show_message(*self._idle_msg)
 
     # ── Frame polling ─────────────────────────────────────────────────────────
 
@@ -1088,12 +1072,8 @@ class HawkSightApp(tk.Tk):
             self._replay.add(frame)
             if not self._btn_replay.enabled:
                 self._btn_replay.set_enabled(True)
-            w = self._canvas.winfo_width()
-            h = self._canvas.winfo_height()
-            resized = self._processor.resize_for_display(
-                frame, w or 800, h or 500
-            )
-            self._display.render(resized)
+            if not self.replaying:
+                self._render(frame)
             self._update_stats(result)
         if self._controller.is_running:
             self._poll_id = self.after(30, self._poll_frames)
@@ -1181,6 +1161,8 @@ class HawkSightApp(tk.Tk):
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     def on_close(self):
+        if self._replay_id:
+            self.after_cancel(self._replay_id)
         self._controller.stop()
         self.destroy()
 

@@ -357,7 +357,8 @@ class HeaderButtonsTest(AppTestCase):
         self.app._btn_shot.invoke()
         self.app._btn_replay.invoke()
         self.assertEqual(list(self.snap_dir.iterdir()), [])
-        self.assertIsNone(self.app._replay_win)
+        self.assertFalse(self.app.replaying)
+        self.assertEqual(self.app._btn_continue.winfo_manager(), "")
 
     def test_screenshot_button_saves_while_camera_is_on(self):
         self.start_and_wait_for_frames(1)
@@ -367,14 +368,41 @@ class HeaderButtonsTest(AppTestCase):
         self.app._on_stop()
         self.assertFalse(self.app._btn_shot.enabled)
 
-    def test_replay_plays_back_recorded_frames(self):
+    def test_replay_plays_in_the_feed_until_continue(self):
         self.start_and_wait_for_frames(5)
-        self.assertTrue(self.app._btn_replay.enabled)
         self.app._btn_replay.invoke()
-        win = self.app._replay_win
-        self.assertIsNotNone(win)
-        self.assertTrue(_pump_until(self.app, lambda: win.finished, timeout=10))
-        win.close()
+        self.assertTrue(self.app.replaying)
+        self.assertEqual(self.app._btn_continue.winfo_manager(), "pack")
+
+        # Live frames are still detected and recorded, but not drawn.
+        with mock.patch.object(self.app._display, "render") as render:
+            before = len(self.app._replay)
+            _pump_until(self.app, lambda: len(self.app._replay) > before + 3)
+            drawn = [c.args[0] for c in render.call_args_list]
+        self.assertTrue(drawn, "replay drew nothing")
+        for frame in drawn:   # every drawn frame carries the REPLAY tag
+            self.assertGreater(int(frame[:, :, 2].max()), 150)
+
+        # It loops instead of ending on its own.
+        _pump_until(self.app, lambda: False, timeout=1.5)
+        self.assertTrue(self.app.replaying)
+
+        self.app._btn_continue.invoke()
+        self.assertFalse(self.app.replaying)
+        self.assertEqual(self.app._btn_continue.winfo_manager(), "")
+        self.assertTrue(self.app._controller.is_running)
+
+    def test_continue_after_stop_shows_the_stopped_screen(self):
+        self.start_and_wait_for_frames(3)
+        self.app._btn_replay.invoke()
+        self.app._on_stop()
+        self.assertTrue(self.app.replaying, "STOP should not end the replay")
+        self.app._btn_continue.invoke()
+        canvas_text = " ".join(
+            self.app._canvas.itemcget(i, "text")
+            for i in self.app._canvas.find_all()
+            if self.app._canvas.type(i) == "text")
+        self.assertIn("Stopped", canvas_text)
 
     def test_replay_still_works_after_stop_and_resets_on_next_start(self):
         self.start_and_wait_for_frames(3)
@@ -384,14 +412,16 @@ class HeaderButtonsTest(AppTestCase):
         _pump_until(self.app, lambda: self.app._sv_status.get() == "Watching")
         self.assertLessEqual(len(self.app._replay), 2)
 
-    def test_r_key_opens_replay(self):
+    def test_r_replays_and_c_continues(self):
         self.start_and_wait_for_frames(3)
         self.app.focus_force()
         self.app.update()
         self.app.event_generate("<KeyPress-r>")
         self.app.update()
-        self.assertIsNotNone(self.app._replay_win)
-        self.app._replay_win.close()
+        self.assertTrue(self.app.replaying)
+        self.app.event_generate("<KeyPress-c>")
+        self.app.update()
+        self.assertFalse(self.app.replaying)
 
 
 class SnapshotTest(AppTestCase):

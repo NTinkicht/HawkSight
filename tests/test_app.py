@@ -191,6 +191,28 @@ class CameraDropdownTest(AppTestCase):
         self.assertEqual(self.app._sv_camera.get(), "Camera 0 (laptop)")
         self.assertEqual(str(self.app._cmb_camera["state"]), "readonly")
 
+    def test_start_glows_while_running_and_stop_glows_after_stop(self):
+        app = self.app
+        glow_start, glow_stop = app.GLOW["start"], app.GLOW["stop"]
+        dim_start, dim_stop = app.DIM["start"][0], app.DIM["stop"][0]
+
+        self.assertEqual(app._btn_start["bg"], app.GREEN)        # just opened
+        self.assertEqual(app._btn_stop["bg"], dim_stop)
+
+        self.start_and_wait()
+        self.assertEqual(app._btn_stop["bg"], dim_stop)
+        seen = set()
+        _pump_until(app, lambda: seen.add(app._btn_start["bg"]) or len(seen) > 1,
+                    timeout=3)
+        self.assertEqual(seen, set(glow_start), "START should pulse")
+
+        app._on_stop()
+        self.assertEqual(app._btn_start["bg"], dim_start)
+        seen.clear()
+        _pump_until(app, lambda: seen.add(app._btn_stop["bg"]) or len(seen) > 1,
+                    timeout=3)
+        self.assertEqual(seen, set(glow_stop), "STOP should pulse")
+
     def test_start_uses_the_chosen_camera(self):
         self.choose("Camera 2")
         self.start_and_wait()

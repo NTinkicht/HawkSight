@@ -227,6 +227,25 @@ class CameraDropdownTest(AppTestCase):
         self.start_and_wait()
         self.assertEqual([v.source for v in FakeVideo.opened], [0])
 
+    def test_no_camera_at_all_says_so_plainly(self):
+        class Unopenable(FakeVideo):
+            def open(self):
+                return False
+        self.CAMERAS = []
+        self.app._btn_rescan.invoke()
+        _pump_until(self.app, lambda: not self.app._scanning)
+        with mock.patch.object(hawksight_app, "VideoSource", Unopenable):
+            self.app._on_start()
+            _pump_until(self.app,
+                        lambda: self.app._sv_status.get() == "No camera found")
+        canvas_text = " ".join(
+            self.app._canvas.itemcget(i, "text")
+            for i in self.app._canvas.find_all()
+            if self.app._canvas.type(i) == "text")
+        self.assertIn("No camera found", canvas_text)
+        self.assertIn("Find cameras", canvas_text)
+        self.assertNotIn("Teams", canvas_text)
+
     def test_camera_that_will_not_open_explains_what_to_check(self):
         class Unopenable(FakeVideo):
             def open(self):

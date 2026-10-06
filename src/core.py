@@ -7,6 +7,7 @@ import sys
 import threading
 import time
 from collections import deque
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Union
@@ -39,10 +40,7 @@ def list_cameras(max_index: int = MAX_CAMERAS,
     may refuse a second open, so indices in `assume_present` (e.g. the live
     feed) are listed without being opened. Slow: call off the UI thread."""
     found = []
-    # Every empty index makes OpenCV print a warning; hide them while probing.
-    log_level = cv2.utils.logging.getLogLevel()
-    cv2.utils.logging.setLogLevel(cv2.utils.logging.LOG_LEVEL_ERROR)
-    try:
+    with _quiet_opencv():
         for i in range(max_index):
             if i in assume_present:
                 found.append(i)
@@ -53,9 +51,19 @@ def list_cameras(max_index: int = MAX_CAMERAS,
                     found.append(i)
             finally:
                 cap.release()
+    return found
+
+
+@contextmanager
+def _quiet_opencv():
+    # A camera index that can't be opened makes OpenCV print a warning to the
+    # console. The app reports camera problems itself, so hide them.
+    log_level = cv2.utils.logging.getLogLevel()
+    cv2.utils.logging.setLogLevel(cv2.utils.logging.LOG_LEVEL_ERROR)
+    try:
+        yield
     finally:
         cv2.utils.logging.setLogLevel(log_level)
-    return found
 
 
 # ─── Data ────────────────────────────────────────────────────────────────────
@@ -101,14 +109,15 @@ class VideoSource:
         backends  = [_camera_backend()] if is_camera else [cv2.CAP_ANY]
         if is_camera and backends[0] == cv2.CAP_DSHOW:
             backends.append(cv2.CAP_MSMF)
-        for backend in backends:
-            self._cap = cv2.VideoCapture(self._source, backend)
-            if self._cap.isOpened():
-                break
-            self._cap.release()
-        else:
-            self._cap = None
-            return False
+        with _quiet_opencv():
+            for backend in backends:
+                self._cap = cv2.VideoCapture(self._source, backend)
+                if self._cap.isOpened():
+                    break
+                self._cap.release()
+            else:
+                self._cap = None
+                return False
         self._cap.set(cv2.CAP_PROP_FRAME_WIDTH,  1280)
         self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
         if is_camera:

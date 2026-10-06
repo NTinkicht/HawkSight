@@ -350,6 +350,7 @@ class HawkSightApp(tk.Tk):
         self._model_key = DEFAULT_MODEL_KEY
         self._cameras: list[int] = []        # indices found by the last scan
         self._camera:  Optional[int] = None  # selected camera index
+        self._none_found = False             # last scan found no camera
         self._scanning = False
         self._starting = False
         self._is_fullscreen = False
@@ -892,7 +893,15 @@ class HawkSightApp(tk.Tk):
             self._sv_status.set(status)
             self._badge.config(text="● PROBLEM", fg=self.RED)
             self._log_write(message, "warn")
-            if status == "Camera problem":
+            if status == "Camera problem" and self._none_found:
+                # The scan saw no camera and the laptop fallback failed too:
+                # Windows can't see any camera, so other apps aren't the cause.
+                status = "No camera found"
+                self._sv_status.set(status)
+                hint = ("Plug in a camera, or turn on the laptop camera "
+                        "(camera key or privacy shutter), then press "
+                        "⟳ Find cameras.")
+            elif status == "Camera problem":
                 hint = ("Close other apps that use the camera (Teams, Zoom), "
                         "then press START again.")
             elif "download" in message:
@@ -1021,6 +1030,7 @@ class HawkSightApp(tk.Tk):
             return
         self._scanning = False
         self._cameras  = found[0]
+        self._none_found = not self._cameras
         if self._cameras:
             n = len(self._cameras)
             self._log_write(f"◆ {n} camera{'s' if n != 1 else ''} found", "div")

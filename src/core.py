@@ -178,6 +178,10 @@ class DetectionModel:
     # (hawksight_custom.pt) has a single gas_cylinder class, so every
     # detection from it is accepted.
     PROXY_CLASSES = {"bottle"}
+    # A box covering almost the whole picture is a known false alarm of the
+    # custom model (it has flagged a plain ceiling at 72-75 %). A real
+    # cylinder only fills the frame when held against the lens.
+    MAX_BOX_FRACTION = 0.9
 
     def __init__(self, model_path: Union[str, Path] = "yolov8n.pt",
                  conf: float = 0.4):
@@ -219,6 +223,7 @@ class DetectionModel:
         if self._model is None:
             return DetectionResult()
         results = self._model.predict(frame, conf=self._conf, verbose=False)[0]
+        frame_area = frame.shape[0] * frame.shape[1]
         boxes, labels, confs = [], [], []
         for box in results.boxes:
             cls_id = int(box.cls[0])
@@ -226,6 +231,8 @@ class DetectionModel:
             if not self._custom and label not in self.PROXY_CLASSES:
                 continue
             x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+            if (x2 - x1) * (y2 - y1) > self.MAX_BOX_FRACTION * frame_area:
+                continue
             conf = float(box.conf[0])
             boxes.append((x1, y1, x2, y2))
             labels.append("Gas Cylinder")

@@ -95,6 +95,36 @@ class ReplayBufferTest(unittest.TestCase):
         self.assertEqual(len(buf), 0)
 
 
+class FakeBox:
+    """Shaped like one entry of an ultralytics result's .boxes."""
+    def __init__(self, xyxy, conf, cls=0):
+        self.xyxy = [np.array(xyxy, dtype=float)]
+        self.conf = [conf]
+        self.cls  = [cls]
+
+
+class WholeFrameFalseAlarmTest(unittest.TestCase):
+    def predict(self, *xyxys):
+        model = DetectionModel()
+        result = mock.Mock(boxes=[FakeBox(b, 0.75) for b in xyxys])
+        model._model  = mock.Mock(names={0: "gas_cylinder"},
+                                  predict=mock.Mock(return_value=[result]))
+        model._custom = True
+        return model.predict(np.zeros((720, 1280, 3), np.uint8))
+
+    def test_box_covering_the_whole_frame_is_ignored(self):
+        self.assertEqual(self.predict((0, 0, 1280, 720)).count, 0)
+        self.assertEqual(self.predict((20, 10, 1260, 710)).count, 0)   # ~94 %
+
+    def test_normal_and_large_boxes_are_kept(self):
+        self.assertEqual(self.predict((400, 150, 800, 650)).count, 1)
+        self.assertEqual(self.predict((100, 50, 1180, 670)).count, 1)  # ~73 %
+
+    def test_only_the_whole_frame_box_is_dropped(self):
+        result = self.predict((0, 0, 1280, 720), (400, 150, 800, 650))
+        self.assertEqual(result.boxes, [(400, 150, 800, 650)])
+
+
 class ConfidenceLimitTest(unittest.TestCase):
     def test_constructor_clamps_confidence(self):
         self.assertEqual(DetectionModel(conf=2).conf, 0.95)

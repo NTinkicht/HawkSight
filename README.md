@@ -138,6 +138,9 @@ the video area says what happened and what to do next in plain words.
   detection never works on old, buffered video.
 - Each frame goes through the model. A cylinder counts only after it has been
   seen in **5 frames in a row**, which filters out one-frame false alarms.
+- A box that covers more than 90 % of the picture is ignored. The custom model
+  sometimes marks the whole frame (for example a plain ceiling) as a cylinder;
+  a real cylinder only fills the frame when held against the lens.
 - Confirmed cylinders get a green box and confidence label, and the alert
   light and the video border blink.
 - If the model fails to load or the camera can't open, the video area explains

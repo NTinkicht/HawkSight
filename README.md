@@ -99,11 +99,17 @@ the desktop app with the `.venv` Python.
 | `F9` | Toggle fullscreen |
 | `Esc` | Exit fullscreen |
 
-The sidebar shows:
-- **Objects:** cylinders in the current frame
-- **Confidence:** best confidence in the current frame
-- **Runtime:** time since START
-- **Alerts:** how many separate sightings this session
+The sidebar has four sections:
+- **Status:** four counters and the alert banner, which flashes
+  "CYLINDER DETECTED" while a cylinder is in view.
+  - **Objects:** cylinders in the current frame
+  - **Confidence:** best confidence in the current frame
+  - **Runtime:** time since START
+  - **Alerts:** how many separate sightings this session
+- **Controls:** START, plus STOP and SNAPSHOT side by side.
+- **Settings:** the **Detection model** and **Camera** dropdowns, the **⟳ Rescan**
+  button, and the confidence slider.
+- **Detection log:** sightings, snapshots, model and camera changes, and errors.
 
 ## How detection works
 

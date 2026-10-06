@@ -121,12 +121,12 @@ class DisplayManager:
         self._canvas.create_text(
             cx, cy + bh // 2 + 30,
             text="Ready to detect",
-            fill="#6a6a6c", font=(FONT, 13, "bold"),
+            fill="#a0a0a2", font=(FONT, 13, "bold"),
         )
         self._canvas.create_text(
             cx, cy + bh // 2 + 52,
             text="Press  START  or  S  to begin",
-            fill="#545456", font=(FONT, 9),
+            fill="#8a8a8c", font=(FONT, 9),
         )
 
     def show_message(self, text: str):
@@ -135,7 +135,7 @@ class DisplayManager:
         w, h = self._dims()
         self._canvas.create_text(
             w // 2, h // 2,
-            text=text, fill="#6a6a6c", font=(FONT, 13, "bold"),
+            text=text, fill="#a0a0a2", font=(FONT, 13, "bold"),
         )
 
 
@@ -158,8 +158,14 @@ class HawkSightApp(tk.Tk):
     BLUE      = "#2e86c1"   # softer blue
     PURPLE    = "#8e44ad"
     FG        = "#d8d8d8"
-    FG_MID    = "#9a9a9a"   # brighter — easier to read
-    FG_DIM    = "#6a6a6a"   # brighter — no more squinting
+    FG_MID    = "#b4b4b4"   # secondary text, ~7:1 on PANEL
+    FG_DIM    = "#9a9a9a"   # labels and hints, >= 4.5:1 on PANEL and CARD_BG
+    # Disabled STOP / SNAPSHOT: neutral grey reads as "off" but stays legible.
+    BTN_OFF_BG = CARD_BG
+    BTN_OFF_FG = FG_DIM
+
+    # Spacing scale (px): every gap in the layout is one of these.
+    S1, S2, S3, S4 = 4, 8, 12, 16
 
     SIDEBAR_W = 278
 
@@ -238,7 +244,10 @@ class HawkSightApp(tk.Tk):
         style.configure("Vertical.TScrollbar", background=self.SEP,
                         troughcolor=self.CARD_BG, bordercolor=self.CARD_BG,
                         arrowcolor=self.FG_MID, lightcolor=self.SEP,
-                        darkcolor=self.SEP)
+                        darkcolor=self.SEP, gripcount=0)
+        style.map("Vertical.TScrollbar",
+                  background=[("pressed", self.ORANGE_DK),
+                              ("active", self.FG_DIM), ("!active", self.SEP)])
         # The dropdown list is a plain Tk listbox, styled through the option db.
         self.option_add("*TCombobox*Listbox.background", self.CARD_BG)
         self.option_add("*TCombobox*Listbox.foreground", self.FG)
@@ -276,17 +285,19 @@ class HawkSightApp(tk.Tk):
         self._build_main_area()    # then middle (expands)
 
     # ── Header ────────────────────────────────────────────────────────────────
+    # No fixed heights: rows size to their text, so nothing is clipped when
+    # Windows display scaling is above 100 %.
 
     def _build_header(self):
-        hdr = tk.Frame(self, bg=self.HEADER, height=68)
+        S2, S3, S4 = self.S2, self.S3, self.S4
+        hdr = tk.Frame(self, bg=self.HEADER)
         hdr.pack(fill=tk.X, side=tk.TOP)
-        hdr.pack_propagate(False)
 
         # Orange accent line at bottom of header
         tk.Frame(hdr, bg=self.ORANGE, height=2).pack(side=tk.BOTTOM, fill=tk.X)
 
         inner = tk.Frame(hdr, bg=self.HEADER)
-        inner.pack(fill=tk.BOTH, expand=True)
+        inner.pack(fill=tk.BOTH, expand=True, padx=S4, pady=S2)
 
         # Logo image
         self._hdr_logo = None
@@ -294,45 +305,41 @@ class HawkSightApp(tk.Tk):
             raw = Image.open(LOGO_PNG).resize((42, 42), Image.LANCZOS)
             self._hdr_logo = ImageTk.PhotoImage(raw)
             tk.Label(inner, image=self._hdr_logo,
-                     bg=self.HEADER).pack(side=tk.LEFT, padx=(18, 10), pady=12)
+                     bg=self.HEADER).pack(side=tk.LEFT, padx=(0, S3))
         except Exception:
             pass
 
         # Brand name + subtitle
         brand = tk.Frame(inner, bg=self.HEADER)
-        brand.pack(side=tk.LEFT, pady=10)
+        brand.pack(side=tk.LEFT)
 
         name_row = tk.Frame(brand, bg=self.HEADER)
         name_row.pack(anchor=tk.W)
-        tk.Label(name_row, text="HAWK", font=(FONT, 21, "bold"),
+        tk.Label(name_row, text="HAWK", font=(FONT, 20, "bold"),
                  bg=self.HEADER, fg=self.ORANGE).pack(side=tk.LEFT)
-        tk.Label(name_row, text="SIGHT", font=(FONT, 21, "bold"),
+        tk.Label(name_row, text="SIGHT", font=(FONT, 20, "bold"),
                  bg=self.HEADER, fg=self.FG).pack(side=tk.LEFT)
 
         tk.Label(brand, text="Gas Cylinder Detection System",
                  font=(FONT, 9), bg=self.HEADER,
-                 fg=self.FG_DIM).pack(anchor=tk.W, pady=(1, 0))
+                 fg=self.FG_MID).pack(anchor=tk.W)
 
         # Right side: FPS counter + status badge
         right = tk.Frame(inner, bg=self.HEADER)
-        right.pack(side=tk.RIGHT, padx=22)
+        right.pack(side=tk.RIGHT)
 
-        # FPS block
         fps_blk = tk.Frame(right, bg=self.HEADER)
-        fps_blk.pack(side=tk.LEFT, padx=(0, 28))
-        tk.Label(fps_blk, text="FPS",
-                 font=(FONT, 7, "bold"),
+        fps_blk.pack(side=tk.LEFT, padx=(0, S4 * 2))
+        tk.Label(fps_blk, text="FPS", font=(FONT, 8, "bold"),
                  bg=self.HEADER, fg=self.FG_DIM).pack()
         self._sv_fps = tk.StringVar(value="—")
         tk.Label(fps_blk, textvariable=self._sv_fps,
-                 font=(MONO, 16, "bold"),
+                 font=(MONO, 15, "bold"),
                  bg=self.HEADER, fg=self.FG_MID).pack()
 
-        # Status badge block
         badge_blk = tk.Frame(right, bg=self.HEADER)
         badge_blk.pack(side=tk.LEFT)
-        tk.Label(badge_blk, text="STATUS",
-                 font=(FONT, 7, "bold"),
+        tk.Label(badge_blk, text="STATUS", font=(FONT, 8, "bold"),
                  bg=self.HEADER, fg=self.FG_DIM).pack()
         self._badge = tk.Label(badge_blk, text="● OFFLINE",
                                font=(FONT, 11, "bold"),
@@ -342,36 +349,36 @@ class HawkSightApp(tk.Tk):
     # ── Status bar ────────────────────────────────────────────────────────────
 
     def _build_status_bar(self):
-        bar = tk.Frame(self, bg=self.HEADER, height=30)
+        S1, S4 = self.S1, self.S4
+        bar = tk.Frame(self, bg=self.HEADER)
         bar.pack(fill=tk.X, side=tk.BOTTOM)
-        bar.pack_propagate(False)
 
         tk.Frame(bar, bg=self.SEP, height=1).pack(side=tk.TOP, fill=tk.X)
 
         self._sv_status = tk.StringVar(value="Idle")
         tk.Label(bar, textvariable=self._sv_status,
-                 font=(FONT, 8, "bold"),
-                 bg=self.HEADER, fg=self.FG_MID).pack(
-            side=tk.LEFT, padx=16, pady=6
+                 font=(FONT, 9, "bold"),
+                 bg=self.HEADER, fg=self.FG).pack(
+            side=tk.LEFT, padx=(S4, 0), pady=S1
         )
 
         tk.Label(bar,
                  text="S = Start    X = Stop    P = Snapshot    F9 = Fullscreen",
-                 font=(FONT, 8), bg=self.HEADER,
-                 fg=self.FG_DIM).pack(side=tk.LEFT, padx=16)
+                 font=(FONT, 9), bg=self.HEADER,
+                 fg=self.FG_DIM).pack(side=tk.LEFT, padx=S4 * 2)
 
         self._sv_footer = tk.StringVar(
             value=f"{MODEL_LABELS[self._model_key]} · HawkSight v2.0 · CIS 4913"
         )
         tk.Label(bar, textvariable=self._sv_footer,
-                 font=(FONT, 8), bg=self.HEADER,
-                 fg=self.SEP).pack(side=tk.RIGHT, padx=16)
+                 font=(FONT, 9), bg=self.HEADER,
+                 fg=self.FG_DIM).pack(side=tk.RIGHT, padx=S4)
 
     # ── Main area (video + sidebar) ───────────────────────────────────────────
 
     def _build_main_area(self):
         main = tk.Frame(self, bg=self.BG)
-        main.pack(fill=tk.BOTH, expand=True, padx=12, pady=(10, 8))
+        main.pack(fill=tk.BOTH, expand=True, padx=self.S3, pady=self.S3)
 
         # Sidebar first (RIGHT), then video fills remaining LEFT space
         self._build_sidebar(main)
@@ -381,7 +388,7 @@ class HawkSightApp(tk.Tk):
 
     def _build_video_panel(self, parent):
         outer = tk.Frame(parent, bg=self.BG)
-        outer.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10))
+        outer.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, self.S3))
 
         self._border = tk.Frame(outer, bg=self.ORANGE)
         self._border.pack(fill=tk.BOTH, expand=True)
@@ -393,26 +400,27 @@ class HawkSightApp(tk.Tk):
         self._canvas.bind("<Configure>", self._on_canvas_resize)
 
     # ── Sidebar ───────────────────────────────────────────────────────────────
+    # Four titled sections. The log is last and takes whatever height is left.
 
     def _build_sidebar(self, parent):
         sb = tk.Frame(parent, bg=self.PANEL, width=self.SIDEBAR_W)
         sb.pack(side=tk.RIGHT, fill=tk.Y)
         sb.pack_propagate(False)
 
-        self._build_stat_cards(sb)
-        self._divider(sb)
-        self._build_alert_banner(sb)
-        self._divider(sb)
-        self._build_controls(sb)
-        self._divider(sb)
-        self._build_settings(sb)
-        self._divider(sb)
-        self._build_log(sb)          # expands to fill remaining space
+        self._build_stat_cards(self._section(sb, "Status"))
+        self._build_alert_banner(self._sidebar_last)
+        self._build_controls(self._section(sb, "Controls"))
+        self._build_settings(self._section(sb, "Settings"))
+        self._build_log(sb)
 
-    def _divider(self, parent, vert_pad=0):
-        tk.Frame(parent, bg=self.SEP, height=1).pack(
-            fill=tk.X, padx=10, pady=vert_pad
-        )
+    def _section(self, parent, title: str) -> tk.Frame:
+        frame = tk.Frame(parent, bg=self.PANEL)
+        frame.pack(fill=tk.X, padx=self.S3, pady=(self.S3, 0))
+        tk.Label(frame, text=title.upper(), font=(FONT, 8, "bold"),
+                 bg=self.PANEL, fg=self.FG_DIM).pack(anchor=tk.W,
+                                                     pady=(0, self.S2))
+        self._sidebar_last = frame
+        return frame
 
     # ── Stat cards (2 × 2 grid) ───────────────────────────────────────────────
 
@@ -421,11 +429,11 @@ class HawkSightApp(tk.Tk):
         f = tk.Frame(parent, bg=self.CARD_BG)
         tk.Frame(f, bg=accent, height=3).pack(fill=tk.X)
         tk.Label(f, text=title.upper(),
-                 font=(FONT, 7, "bold"),
-                 bg=self.CARD_BG, fg=self.FG_DIM).pack(pady=(5, 0))
+                 font=(FONT, 8, "bold"),
+                 bg=self.CARD_BG, fg=self.FG_DIM).pack(pady=(self.S1, 0))
         tk.Label(f, textvariable=var,
-                 font=(MONO, 19, "bold"),
-                 bg=self.CARD_BG, fg=val_color).pack(pady=(0, 7))
+                 font=(MONO, 17, "bold"),
+                 bg=self.CARD_BG, fg=val_color).pack(pady=(0, self.S1))
         return f
 
     def _build_stat_cards(self, parent):
@@ -435,14 +443,14 @@ class HawkSightApp(tk.Tk):
         self._sv_total   = tk.StringVar(value="0")
 
         grid = tk.Frame(parent, bg=self.PANEL)
-        grid.pack(fill=tk.X, padx=8, pady=8)
+        grid.pack(fill=tk.X)
 
         c1 = self._make_card(grid, "Objects",    self._sv_objects, self.ORANGE, self.ORANGE)
         c2 = self._make_card(grid, "Confidence", self._sv_best,    self.GREEN,  self.GREEN)
         c3 = self._make_card(grid, "Runtime",    self._sv_runtime, self.BLUE,   self.FG)
         c4 = self._make_card(grid, "Alerts",     self._sv_total,   self.PURPLE, self.FG)
 
-        g = 5
+        g = self.S1
         c1.grid(row=0, column=0, sticky="nsew", padx=(0, g), pady=(0, g))
         c2.grid(row=0, column=1, sticky="nsew", padx=(g, 0), pady=(0, g))
         c3.grid(row=1, column=0, sticky="nsew", padx=(0, g), pady=(g, 0))
@@ -453,97 +461,96 @@ class HawkSightApp(tk.Tk):
     # ── Alert banner ──────────────────────────────────────────────────────────
 
     def _build_alert_banner(self, parent):
-        self._alert_frame = tk.Frame(parent, bg=self.CARD_BG, height=52)
-        self._alert_frame.pack(fill=tk.X, padx=8, pady=8)
-        self._alert_frame.pack_propagate(False)
+        self._alert_frame = tk.Frame(parent, bg=self.CARD_BG)
+        self._alert_frame.pack(fill=tk.X, pady=(self.S2, 0))
 
+        # Icon and text sit together, centred as one group.
+        row = tk.Frame(self._alert_frame, bg=self.CARD_BG)
+        row.pack(pady=self.S2)
+        self._alert_row = row
         self._alert_dot = tk.Label(
-            self._alert_frame, text="●",
-            font=(FONT, 11), bg=self.CARD_BG, fg=self.FG_DIM,
+            row, text="●", font=(FONT, 11), bg=self.CARD_BG, fg=self.FG_DIM,
         )
-        self._alert_dot.place(relx=0.13, rely=0.5, anchor=tk.CENTER)
-
+        self._alert_dot.pack(side=tk.LEFT, padx=(0, self.S2))
         self._alert_lbl = tk.Label(
-            self._alert_frame, text="MONITORING",
+            row, text="MONITORING",
             font=(FONT, 10, "bold"), bg=self.CARD_BG, fg=self.FG_DIM,
         )
-        self._alert_lbl.place(relx=0.58, rely=0.5, anchor=tk.CENTER)
+        self._alert_lbl.pack(side=tk.LEFT)
 
     # ── Controls ──────────────────────────────────────────────────────────────
 
     def _build_controls(self, parent):
-        ctrl = tk.Frame(parent, bg=self.PANEL)
-        ctrl.pack(fill=tk.X, padx=8, pady=8)
-
-        cfg = dict(font=(FONT, 11, "bold"), relief=tk.FLAT,
-                   cursor="hand2", bd=0)
+        cfg = dict(relief=tk.FLAT, cursor="hand2", bd=0)
 
         self._btn_start = tk.Button(
-            ctrl, text="▶   START",
+            parent, text="▶   START", font=(FONT, 11, "bold"),
             bg=self.GREEN, fg="white",
             activebackground=self.GREEN_DK, activeforeground="white",
             command=self._on_start, **cfg,
         )
-        self._btn_start.pack(fill=tk.X, pady=(0, 5), ipady=10)
+        self._btn_start.pack(fill=tk.X, ipady=self.S2)
+
+        pair = tk.Frame(parent, bg=self.PANEL)
+        pair.pack(fill=tk.X, pady=(self.S2, 0))
+        pair.columnconfigure(0, weight=1, uniform="pair")
+        pair.columnconfigure(1, weight=1, uniform="pair")
 
         self._btn_stop = tk.Button(
-            ctrl, text="■   STOP",
-            bg="#3a2424", fg="#a06060",
-            activebackground=self.RED_DK, activeforeground=self.RED,
+            pair, text="■  STOP", font=(FONT, 10, "bold"),
+            bg=self.BTN_OFF_BG, fg=self.BTN_OFF_FG,
+            disabledforeground=self.BTN_OFF_FG,
+            activebackground=self.RED_DK, activeforeground="white",
             command=self._on_stop, state=tk.DISABLED, **cfg,
         )
-        self._btn_stop.pack(fill=tk.X, pady=(0, 5), ipady=10)
+        self._btn_stop.grid(row=0, column=0, sticky="ew",
+                            padx=(0, self.S1), ipady=self.S1 + 2)
 
         self._btn_snap = tk.Button(
-            ctrl, text="◎   SNAPSHOT",
-            bg="#242c38", fg="#6080a0",
-            activebackground="#2a3a50", activeforeground=self.BLUE,
+            pair, text="◎  SNAPSHOT", font=(FONT, 10, "bold"),
+            bg=self.BTN_OFF_BG, fg=self.BTN_OFF_FG,
+            disabledforeground=self.BTN_OFF_FG,
+            activebackground="#1f6da0", activeforeground="white",
             command=self._on_snapshot, state=tk.DISABLED, **cfg,
         )
-        self._btn_snap.pack(fill=tk.X, ipady=10)
-
-        tk.Label(ctrl, text="S  ·  X  ·  P   keyboard shortcuts",
-                 font=(FONT, 7), bg=self.PANEL,
-                 fg=self.FG_DIM).pack(pady=(5, 0))
+        self._btn_snap.grid(row=0, column=1, sticky="ew",
+                            padx=(self.S1, 0), ipady=self.S1 + 2)
 
     # ── Settings ──────────────────────────────────────────────────────────────
 
-    def _build_settings(self, parent):
-        cfg = tk.Frame(parent, bg=self.PANEL)
-        cfg.pack(fill=tk.X, padx=8, pady=8)
+    def _field_label(self, parent, text: str):
+        tk.Label(parent, text=text, font=(FONT, 9),
+                 bg=self.PANEL, fg=self.FG_MID).pack(anchor=tk.W,
+                                                    pady=(0, self.S1))
+
+    def _build_settings(self, cfg):
+        S1, S2, S3 = self.S1, self.S2, self.S3
 
         # Detection model dropdown
-        row0 = tk.Frame(cfg, bg=self.PANEL)
-        row0.pack(fill=tk.X, pady=(0, 9))
-        tk.Label(row0, text="Detection model",
-                 font=(FONT, 9), bg=self.PANEL, fg=self.FG_MID).pack(anchor=tk.W)
-
+        self._field_label(cfg, "Detection model")
         self._model_keys = available_model_keys()
         self._sv_model = tk.StringVar(value=MODEL_LABELS[self._model_key])
         self._cmb_model = ttk.Combobox(
-            row0, textvariable=self._sv_model, state="readonly",
+            cfg, textvariable=self._sv_model, state="readonly",
             values=[MODEL_LABELS[k] for k in self._model_keys],
             style="Dark.TCombobox", font=(FONT, 9),
         )
-        self._cmb_model.pack(fill=tk.X, pady=(4, 0))
+        self._cmb_model.pack(fill=tk.X, pady=(0, S3))
         self._cmb_model.bind("<<ComboboxSelected>>", self._on_model_selected)
 
         # Camera dropdown + rescan button
-        row1 = tk.Frame(cfg, bg=self.PANEL)
-        row1.pack(fill=tk.X, pady=(0, 9))
-        tk.Label(row1, text="Camera",
-                 font=(FONT, 9), bg=self.PANEL, fg=self.FG_MID).pack(anchor=tk.W)
-
-        cam_row = tk.Frame(row1, bg=self.PANEL)
-        cam_row.pack(fill=tk.X, pady=(4, 0))
+        self._field_label(cfg, "Camera")
+        cam_row = tk.Frame(cfg, bg=self.PANEL)
+        cam_row.pack(fill=tk.X, pady=(0, S3))
         self._btn_rescan = tk.Button(
-            cam_row, text="⟳", font=(FONT, 11), width=3,
-            bg=self.CARD_BG, fg=self.FG_MID,
-            activebackground=self.SEP, activeforeground=self.ORANGE,
-            relief=tk.FLAT, bd=0, cursor="hand2",
+            cam_row, text="⟳ Rescan", font=(FONT, 9),
+            bg=self.CARD_BG, fg=self.FG,
+            disabledforeground=self.FG_DIM,
+            activebackground=self.SEP, activeforeground=self.ORANGE_LT,
+            relief=tk.FLAT, bd=0, cursor="hand2", padx=S2,
             command=self._scan_cameras,
         )
-        self._btn_rescan.pack(side=tk.RIGHT, fill=tk.Y, padx=(6, 0))
+        self._btn_rescan.pack(side=tk.RIGHT, fill=tk.Y, padx=(S2, 0))
         self._sv_camera = tk.StringVar(value="Scanning for cameras…")
         self._cmb_camera = ttk.Combobox(
             cam_row, textvariable=self._sv_camera, state=tk.DISABLED,
@@ -552,56 +559,67 @@ class HawkSightApp(tk.Tk):
         self._cmb_camera.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self._cmb_camera.bind("<<ComboboxSelected>>", self._on_camera_selected)
 
-        # Confidence slider row
-        row2 = tk.Frame(cfg, bg=self.PANEL)
-        row2.pack(fill=tk.X)
-        tk.Label(row2, text="Confidence threshold",
+        # Confidence slider
+        row = tk.Frame(cfg, bg=self.PANEL)
+        row.pack(fill=tk.X)
+        tk.Label(row, text="Confidence threshold",
                  font=(FONT, 9), bg=self.PANEL, fg=self.FG_MID).pack(side=tk.LEFT)
-        self._lbl_conf = tk.Label(row2, text=f"{DEFAULT_CONF:.0%}",
-                                   font=(FONT, 9, "bold"),
-                                   bg=self.PANEL, fg=self.ORANGE)
+        self._lbl_conf = tk.Label(row, text=f"{DEFAULT_CONF:.0%}",
+                                  font=(FONT, 9, "bold"),
+                                  bg=self.PANEL, fg=self.ORANGE)
         self._lbl_conf.pack(side=tk.RIGHT)
 
         self._sv_conf = tk.DoubleVar(value=DEFAULT_CONF)
         ttk.Scale(
             cfg, from_=0.05, to=0.95, orient=tk.HORIZONTAL,
             variable=self._sv_conf, command=self._on_conf_change,
-        ).pack(fill=tk.X, pady=(5, 0))
+        ).pack(fill=tk.X, pady=(S1, 0))
 
-        # Loading indicator
+        # Loading indicator: only takes up space while a model is loading.
         self._lbl_loading = tk.Label(cfg, text="",
-                                      font=(FONT, 8, "italic"),
-                                      bg=self.PANEL, fg=self.ORANGE)
-        self._lbl_loading.pack(pady=(4, 0))
+                                     font=(FONT, 9, "italic"),
+                                     bg=self.PANEL, fg=self.ORANGE_LT)
+
+    def _set_loading(self, text: str):
+        self._lbl_loading.config(text=text)
+        if text:
+            self._lbl_loading.pack(anchor=tk.W, pady=(self.S1, 0))
+        else:
+            self._lbl_loading.pack_forget()
 
     # ── Detection log ─────────────────────────────────────────────────────────
 
     def _build_log(self, parent):
+        S1, S2, S3 = self.S1, self.S2, self.S3
         frame = tk.Frame(parent, bg=self.PANEL)
-        frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=(8, 10))
+        frame.pack(fill=tk.BOTH, expand=True, padx=S3, pady=(S2, S3))
 
         hdr = tk.Frame(frame, bg=self.PANEL)
-        hdr.pack(fill=tk.X, pady=(0, 4))
+        hdr.pack(fill=tk.X, pady=(0, S2))
         tk.Label(hdr, text="DETECTION LOG",
-                 font=(FONT, 7, "bold"),
+                 font=(FONT, 8, "bold"),
                  bg=self.PANEL, fg=self.FG_DIM).pack(side=tk.LEFT)
-        tk.Button(hdr, text="Clear", font=(FONT, 7),
-                  bg=self.PANEL, fg=self.FG_DIM,
-                  relief=tk.FLAT, cursor="hand2", bd=0,
+        tk.Button(hdr, text="Clear", font=(FONT, 8),
+                  bg=self.PANEL, fg=self.FG_MID,
+                  activebackground=self.SEP, activeforeground=self.FG,
+                  relief=tk.FLAT, cursor="hand2", bd=0, padx=S1,
                   command=self._clear_log).pack(side=tk.RIGHT)
 
+        # height=4: ask for little, then expand into whatever space is left,
+        # so the log never pushes itself off the bottom of the sidebar.
         self._log = tk.Text(
-            frame, bg=self.CARD_BG, fg=self.FG,
-            font=(MONO, 8), relief=tk.FLAT,
+            frame, bg=self.CARD_BG, fg=self.FG, height=4,
+            font=(MONO, 9), relief=tk.FLAT,
             wrap=tk.WORD, state=tk.DISABLED,
+            padx=S2, pady=S1, spacing1=1, spacing3=1,
             insertbackground=self.ORANGE,
             selectbackground="#4a3020",
         )
         self._log.tag_configure("detect", foreground=self.ORANGE_LT)
         self._log.tag_configure("clear",  foreground=self.FG_DIM)
-        self._log.tag_configure("snap",   foreground=self.BLUE)
-        self._log.tag_configure("warn",   foreground=self.RED)
-        self._log.tag_configure("div",    foreground=self.SEP)
+        self._log.tag_configure("snap",   foreground="#5dade2")
+        self._log.tag_configure("warn",   foreground="#e8705f")
+        self._log.tag_configure("div",    foreground=self.FG_DIM)
 
         sb = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=self._log.yview)
         self._log.configure(yscrollcommand=sb.set)
@@ -638,14 +656,14 @@ class HawkSightApp(tk.Tk):
         self._cmb_model.config(state=tk.DISABLED)
         if self._model.is_loaded or MODEL_PATHS[self._model_key].exists():
             self._sv_status.set("Loading model…")
-            self._lbl_loading.config(
-                text=f"Loading {MODEL_LABELS[self._model_key]} weights…"
+            self._set_loading(
+                f"Loading {MODEL_LABELS[self._model_key]} weights…"
             )
         else:
             name = MODEL_PATHS[self._model_key].name
             self._sv_status.set("Downloading model…")
-            self._lbl_loading.config(
-                text=f"Downloading {name} (first use only, about 6 MB)…"
+            self._set_loading(
+                f"Downloading {name} (first use only, about 6 MB)…"
             )
             self._log_write(f"◆ {name} not found, downloading it once…", "div")
 
@@ -689,7 +707,7 @@ class HawkSightApp(tk.Tk):
     def _post_start(self, ok: bool, status: str, message: str):
         self._starting = False
         self._set_camera_controls()
-        self._lbl_loading.config(text="")
+        self._set_loading("")
         if ok:
             self._btn_stop.config(
                 state=tk.NORMAL,
@@ -728,14 +746,9 @@ class HawkSightApp(tk.Tk):
         self._display.show_message(
             "Feed stopped  —  press  S  or  START  to resume"
         )
-        self._btn_stop.config(
-            state=tk.DISABLED,
-            bg="#3a2424", fg="#a06060",
-        )
-        self._btn_snap.config(
-            state=tk.DISABLED,
-            bg="#242c38", fg="#6080a0",
-        )
+        for btn in (self._btn_stop, self._btn_snap):
+            btn.config(state=tk.DISABLED,
+                       bg=self.BTN_OFF_BG, fg=self.BTN_OFF_FG)
         self._btn_start.config(state=tk.NORMAL)
         self._cmb_model.config(state="readonly")
         self._sv_status.set("Stopped")
@@ -942,6 +955,7 @@ class HawkSightApp(tk.Tk):
             self._alert_id = None
         bg = self.CARD_BG
         self._alert_frame.config(bg=bg)
+        self._alert_row.config(bg=bg)
         self._alert_dot.config(bg=bg, fg=self.FG_DIM, text="●")
         self._alert_lbl.config(bg=bg, fg=self.FG_DIM, text="MONITORING")
         self._border.config(bg=self.ORANGE)
@@ -959,6 +973,7 @@ class HawkSightApp(tk.Tk):
             lbl_fg     = self.ORANGE_LT
             border_col = self.ORANGE_DK
         self._alert_frame.config(bg=bg)
+        self._alert_row.config(bg=bg)
         self._alert_dot.config(bg=bg, fg=dot_fg, text="⚑")
         self._alert_lbl.config(bg=bg, fg=lbl_fg, text="CYLINDER DETECTED")
         self._border.config(bg=border_col)

@@ -67,7 +67,7 @@ class AppTestCase(unittest.TestCase):
 
 class StartupTest(AppTestCase):
     def test_window_starts_idle(self):
-        self.assertEqual(self.app._sv_status.get(), "Idle")
+        self.assertEqual(self.app._sv_status.get(), "Ready")
         self.assertEqual(str(self.app._btn_start["state"]), tk.NORMAL)
 
 
@@ -83,7 +83,7 @@ class ModelLoadFailureTest(AppTestCase):
 
         self.assertTrue(recovered, "START button stayed disabled")
         self.assertEqual(str(self.app._cmb_model["state"]), "readonly")
-        self.assertEqual(self.app._sv_status.get(), "Model error")
+        self.assertEqual(self.app._sv_status.get(), "Detector problem")
         self.assertIn("weights file is corrupt", self.log_text())
         self.assertFalse(self.app._controller.is_running)
 
@@ -182,7 +182,7 @@ class CameraDropdownTest(AppTestCase):
     def start_and_wait(self):
         self.app._on_start()
         self.assertTrue(_pump_until(
-            self.app, lambda: self.app._sv_status.get() == "Running"))
+            self.app, lambda: self.app._sv_status.get() == "Watching"))
 
     def test_dropdown_lists_connected_cameras(self):
         self.assertEqual(list(self.app._cmb_camera["values"]),
@@ -233,10 +233,70 @@ class CameraDropdownTest(AppTestCase):
         with mock.patch.object(hawksight_app, "VideoSource", Unopenable):
             self.app._on_start()
             _pump_until(self.app,
-                        lambda: self.app._sv_status.get() == "Camera error")
+                        lambda: self.app._sv_status.get() == "Camera problem")
         self.assertIn("Could not open Camera 0 (laptop)", self.log_text())
         self.assertIn("Privacy", self.log_text())
         self.assertEqual(str(self.app._btn_start["state"]), tk.NORMAL)
+
+
+class EasyUiTest(AppTestCase):
+    def test_there_is_no_snapshot_button(self):
+        self.assertFalse(hasattr(self.app, "_btn_snap"))
+
+    def test_log_is_hidden_until_show_log_is_clicked(self):
+        self.assertFalse(self.app.log_visible)
+        self.app._btn_log.invoke()
+        self.app.update()
+        self.assertTrue(self.app.log_visible)
+        self.assertIn("Hide log", self.app._btn_log["text"])
+        self.app._btn_log.invoke()
+        self.app.update()
+        self.assertFalse(self.app.log_visible)
+
+    def test_alert_banner_says_camera_is_off_at_start(self):
+        self.assertEqual(self.app._alert_lbl["text"], "Camera is off")
+
+    def test_camera_problem_is_shown_on_the_video_area(self):
+        class Unopenable(FakeVideo):
+            def open(self):
+                return False
+        self.app._model.load = lambda: None
+        with mock.patch.object(hawksight_app, "VideoSource", Unopenable):
+            self.app._on_start()
+            _pump_until(self.app,
+                        lambda: self.app._sv_status.get() == "Camera problem")
+        canvas_text = " ".join(
+            self.app._canvas.itemcget(i, "text")
+            for i in self.app._canvas.find_all()
+            if self.app._canvas.type(i) == "text")
+        self.assertIn("Camera problem", canvas_text)
+        self.assertIn("press START again", canvas_text)
+
+
+class PhotoKeyTest(AppTestCase):
+    def setUp(self):
+        super().setUp()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.snap_dir = Path(tmp.name)
+        patcher = mock.patch.object(hawksight_app, "SNAP_DIR", self.snap_dir)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        patcher = mock.patch.object(hawksight_app, "VideoSource", FakeVideo)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.app._model.load = lambda: None
+
+    def test_p_takes_a_photo_while_the_camera_is_on(self):
+        self.app._on_start()
+        self.assertTrue(_pump_until(
+            self.app, lambda: self.app._last_frame is not None))
+        self.app.focus_force()
+        self.app.update()
+        self.app.event_generate("<KeyPress-p>")
+        self.app.update()
+        self.assertEqual(len(list(self.snap_dir.glob("*.jpg"))), 1)
+        self.assertIn("Photo saved", self.app._sv_status.get())
 
 
 class SnapshotTest(AppTestCase):
@@ -271,9 +331,9 @@ class KeyboardShortcutTest(AppTestCase):
 
     def test_stop_key_does_nothing_while_stop_is_disabled(self):
         self.press("x")
-        self.assertEqual(self.app._sv_status.get(), "Idle")
+        self.assertEqual(self.app._sv_status.get(), "Ready")
 
-    def test_snapshot_key_does_nothing_while_snapshot_is_disabled(self):
+    def test_photo_key_does_nothing_while_camera_is_off(self):
         self.app._last_frame = np.zeros((10, 10, 3), dtype=np.uint8)
         with tempfile.TemporaryDirectory() as tmp, \
                 mock.patch.object(hawksight_app, "SNAP_DIR", Path(tmp)), \
@@ -287,7 +347,7 @@ class KeyboardShortcutTest(AppTestCase):
             raise RuntimeError("no model in tests")
         self.app._model.load = broken_load
         self.press("S")
-        self.assertNotEqual(self.app._sv_status.get(), "Idle")
+        self.assertNotEqual(self.app._sv_status.get(), "Ready")
         _pump_until(self.app,
                     lambda: str(self.app._btn_start["state"]) == tk.NORMAL)
 

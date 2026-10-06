@@ -30,7 +30,8 @@ LOGO_PNG   = ASSETS_DIR / "HawkSight_Logo.png"
 LOGO_ICO   = ASSETS_DIR / "HawkSight_Logo.ico"
 # Selectable model checkpoints, in dropdown order.
 MODEL_PATHS  = {"custom": CUSTOM_PT, "yolo": YOLO_PT}
-MODEL_LABELS = {"custom": "HawkSight custom", "yolo": "YOLOv8n (bottle proxy)"}
+MODEL_LABELS = {"custom": "HawkSight (best for cylinders)",
+                "yolo":   "Basic YOLOv8n (spots bottles)"}
 DEFAULT_MODEL_KEY = "custom" if DEFAULT_MODEL == CUSTOM_PT else "yolo"
 SNAP_DIR = _ROOT / "snapshots"
 # On a laptop, camera 0 is the built-in one. Used when the scan finds nothing.
@@ -126,23 +127,28 @@ class DisplayManager:
         # Prompt text — visible on the softer background
         self._canvas.create_text(
             cx, cy + bh // 2 + 30,
-            text="Ready to detect",
+            text="Ready!",
             fill="#a0a0a2", font=(FONT, 13, "bold"),
         )
         self._canvas.create_text(
             cx, cy + bh // 2 + 52,
-            text="Press  START  or  S  to begin",
+            text="Press the green  START  button to begin",
             fill="#8a8a8c", font=(FONT, 9),
         )
 
-    def show_message(self, text: str):
+    def show_message(self, title: str, hint: str = "", color: str = "#a0a0a2"):
         self._canvas.delete("all")
         self._img_id = None
         w, h = self._dims()
         self._canvas.create_text(
-            w // 2, h // 2,
-            text=text, fill="#a0a0a2", font=(FONT, 13, "bold"),
+            w // 2, h // 2 - (14 if hint else 0),
+            text=title, fill=color, font=(FONT, 16, "bold"),
         )
+        if hint:
+            self._canvas.create_text(
+                w // 2, h // 2 + 18, width=max(w - 80, 200),
+                text=hint, fill="#a0a0a2", font=(FONT, 10), justify=tk.CENTER,
+            )
 
 
 # ─── HawkSightApp ─────────────────────────────────────────────────────────────
@@ -199,6 +205,8 @@ class HawkSightApp(tk.Tk):
         self._scanning = False
         self._starting = False
         self._is_fullscreen = False
+        self._idle_msg: Optional[tuple] = None   # None = "Ready!" placeholder
+        self._status_id: Optional[str] = None    # pending status-bar restore
 
         self._load_icon()
         self._init_styles()
@@ -266,10 +274,12 @@ class HawkSightApp(tk.Tk):
     def _bind_keys(self):
         # Each shortcut presses its button; invoke() does nothing while the
         # button is disabled. Bind both cases so Caps Lock doesn't matter.
-        for key, button in (("s", self._btn_start), ("x", self._btn_stop),
-                            ("p", self._btn_snap)):
+        for key, button in (("s", self._btn_start), ("x", self._btn_stop)):
             for k in (key, key.upper()):
                 self.bind(f"<{k}>", lambda _, b=button: b.invoke())
+        # There is no photo button; P takes one while the camera is on.
+        for k in ("p", "P"):
+            self.bind(f"<{k}>", lambda _: self._on_photo_key())
         self.bind("<F9>", lambda _: self._toggle_fullscreen())
         self.bind("<Escape>", lambda _: self._exit_fullscreen())
 
@@ -326,7 +336,7 @@ class HawkSightApp(tk.Tk):
         tk.Label(name_row, text="SIGHT", font=(FONT, 20, "bold"),
                  bg=self.HEADER, fg=self.FG).pack(side=tk.LEFT)
 
-        tk.Label(brand, text="Gas Cylinder Detection System",
+        tk.Label(brand, text="Spots gas cylinders on camera",
                  font=(FONT, 9), bg=self.HEADER,
                  fg=self.FG_MID).pack(anchor=tk.W)
 
@@ -345,9 +355,9 @@ class HawkSightApp(tk.Tk):
 
         badge_blk = tk.Frame(right, bg=self.HEADER)
         badge_blk.pack(side=tk.LEFT)
-        tk.Label(badge_blk, text="STATUS", font=(FONT, 8, "bold"),
+        tk.Label(badge_blk, text="CAMERA", font=(FONT, 8, "bold"),
                  bg=self.HEADER, fg=self.FG_DIM).pack()
-        self._badge = tk.Label(badge_blk, text="● OFFLINE",
+        self._badge = tk.Label(badge_blk, text="● OFF",
                                font=(FONT, 11, "bold"),
                                bg=self.HEADER, fg=self.RED)
         self._badge.pack()
@@ -361,7 +371,7 @@ class HawkSightApp(tk.Tk):
 
         tk.Frame(bar, bg=self.SEP, height=1).pack(side=tk.TOP, fill=tk.X)
 
-        self._sv_status = tk.StringVar(value="Idle")
+        self._sv_status = tk.StringVar(value="Ready")
         tk.Label(bar, textvariable=self._sv_status,
                  font=(FONT, 9, "bold"),
                  bg=self.HEADER, fg=self.FG).pack(
@@ -369,7 +379,7 @@ class HawkSightApp(tk.Tk):
         )
 
         tk.Label(bar,
-                 text="S = Start    X = Stop    P = Snapshot    F9 = Fullscreen",
+                 text="Keys:   S = Start    X = Stop    P = Take a photo    F9 = Full screen",
                  font=(FONT, 9), bg=self.HEADER,
                  fg=self.FG_DIM).pack(side=tk.LEFT, padx=S4 * 2)
 
@@ -413,9 +423,9 @@ class HawkSightApp(tk.Tk):
         sb.pack(side=tk.RIGHT, fill=tk.Y)
         sb.pack_propagate(False)
 
-        self._build_stat_cards(self._section(sb, "Status"))
-        self._build_alert_banner(self._sidebar_last)
-        self._build_controls(self._section(sb, "Controls"))
+        self._build_alert_banner(self._section(sb, "Right now"))
+        self._build_stat_cards(self._sidebar_last)
+        self._build_controls(self._section(sb, "Camera on / off"))
         self._build_settings(self._section(sb, "Settings"))
         self._build_log(sb)
 
@@ -449,12 +459,12 @@ class HawkSightApp(tk.Tk):
         self._sv_total   = tk.StringVar(value="0")
 
         grid = tk.Frame(parent, bg=self.PANEL)
-        grid.pack(fill=tk.X)
+        grid.pack(fill=tk.X, pady=(self.S2, 0))
 
-        c1 = self._make_card(grid, "Objects",    self._sv_objects, self.ORANGE, self.ORANGE)
-        c2 = self._make_card(grid, "Confidence", self._sv_best,    self.GREEN,  self.GREEN)
-        c3 = self._make_card(grid, "Runtime",    self._sv_runtime, self.BLUE,   self.FG)
-        c4 = self._make_card(grid, "Alerts",     self._sv_total,   self.PURPLE, self.FG)
+        c1 = self._make_card(grid, "Cylinders now", self._sv_objects, self.ORANGE, self.ORANGE)
+        c2 = self._make_card(grid, "How sure",      self._sv_best,    self.GREEN,  self.GREEN)
+        c3 = self._make_card(grid, "Time on",       self._sv_runtime, self.BLUE,   self.FG)
+        c4 = self._make_card(grid, "Times spotted", self._sv_total,   self.PURPLE, self.FG)
 
         g = self.S1
         c1.grid(row=0, column=0, sticky="nsew", padx=(0, g), pady=(0, g))
@@ -468,19 +478,19 @@ class HawkSightApp(tk.Tk):
 
     def _build_alert_banner(self, parent):
         self._alert_frame = tk.Frame(parent, bg=self.CARD_BG)
-        self._alert_frame.pack(fill=tk.X, pady=(self.S2, 0))
+        self._alert_frame.pack(fill=tk.X)
 
         # Icon and text sit together, centred as one group.
         row = tk.Frame(self._alert_frame, bg=self.CARD_BG)
         row.pack(pady=self.S2)
         self._alert_row = row
         self._alert_dot = tk.Label(
-            row, text="●", font=(FONT, 11), bg=self.CARD_BG, fg=self.FG_DIM,
+            row, text="●", font=(FONT, 12), bg=self.CARD_BG, fg=self.FG_DIM,
         )
         self._alert_dot.pack(side=tk.LEFT, padx=(0, self.S2))
         self._alert_lbl = tk.Label(
-            row, text="MONITORING",
-            font=(FONT, 10, "bold"), bg=self.CARD_BG, fg=self.FG_DIM,
+            row, text="Camera is off",
+            font=(FONT, 11, "bold"), bg=self.CARD_BG, fg=self.FG_DIM,
         )
         self._alert_lbl.pack(side=tk.LEFT)
 
@@ -490,37 +500,21 @@ class HawkSightApp(tk.Tk):
         cfg = dict(relief=tk.FLAT, cursor="hand2", bd=0)
 
         self._btn_start = tk.Button(
-            parent, text="▶   START", font=(FONT, 11, "bold"),
+            parent, text="▶   START", font=(FONT, 12, "bold"),
             bg=self.GREEN, fg="white",
             activebackground=self.GREEN_DK, activeforeground="white",
             command=self._on_start, **cfg,
         )
         self._btn_start.pack(fill=tk.X, ipady=self.S2)
 
-        pair = tk.Frame(parent, bg=self.PANEL)
-        pair.pack(fill=tk.X, pady=(self.S2, 0))
-        pair.columnconfigure(0, weight=1, uniform="pair")
-        pair.columnconfigure(1, weight=1, uniform="pair")
-
         self._btn_stop = tk.Button(
-            pair, text="■  STOP", font=(FONT, 10, "bold"),
+            parent, text="■   STOP", font=(FONT, 11, "bold"),
             bg=self.BTN_OFF_BG, fg=self.BTN_OFF_FG,
             disabledforeground=self.BTN_OFF_FG,
             activebackground=self.RED_DK, activeforeground="white",
             command=self._on_stop, state=tk.DISABLED, **cfg,
         )
-        self._btn_stop.grid(row=0, column=0, sticky="ew",
-                            padx=(0, self.S1), ipady=self.S1 + 2)
-
-        self._btn_snap = tk.Button(
-            pair, text="◎  SNAPSHOT", font=(FONT, 10, "bold"),
-            bg=self.BTN_OFF_BG, fg=self.BTN_OFF_FG,
-            disabledforeground=self.BTN_OFF_FG,
-            activebackground="#1f6da0", activeforeground="white",
-            command=self._on_snapshot, state=tk.DISABLED, **cfg,
-        )
-        self._btn_snap.grid(row=0, column=1, sticky="ew",
-                            padx=(self.S1, 0), ipady=self.S1 + 2)
+        self._btn_stop.pack(fill=tk.X, pady=(self.S2, 0), ipady=self.S1 + 2)
 
     # ── Settings ──────────────────────────────────────────────────────────────
 
@@ -533,7 +527,7 @@ class HawkSightApp(tk.Tk):
         S1, S2, S3 = self.S1, self.S2, self.S3
 
         # Detection model dropdown
-        self._field_label(cfg, "Detection model")
+        self._field_label(cfg, "What to look for")
         self._model_keys = available_model_keys()
         self._sv_model = tk.StringVar(value=MODEL_LABELS[self._model_key])
         self._cmb_model = ttk.Combobox(
@@ -549,7 +543,7 @@ class HawkSightApp(tk.Tk):
         cam_row = tk.Frame(cfg, bg=self.PANEL)
         cam_row.pack(fill=tk.X, pady=(0, S3))
         self._btn_rescan = tk.Button(
-            cam_row, text="⟳ Rescan", font=(FONT, 9),
+            cam_row, text="⟳ Find cameras", font=(FONT, 9),
             bg=self.CARD_BG, fg=self.FG,
             disabledforeground=self.FG_DIM,
             activebackground=self.SEP, activeforeground=self.ORANGE_LT,
@@ -568,7 +562,7 @@ class HawkSightApp(tk.Tk):
         # Confidence slider
         row = tk.Frame(cfg, bg=self.PANEL)
         row.pack(fill=tk.X)
-        tk.Label(row, text="Confidence threshold",
+        tk.Label(row, text="How sure before it alerts",
                  font=(FONT, 9), bg=self.PANEL, fg=self.FG_MID).pack(side=tk.LEFT)
         self._lbl_conf = tk.Label(row, text=f"{DEFAULT_CONF:.0%}",
                                   font=(FONT, 9, "bold"),
@@ -597,24 +591,30 @@ class HawkSightApp(tk.Tk):
 
     def _build_log(self, parent):
         S1, S2, S3 = self.S1, self.S2, self.S3
-        frame = tk.Frame(parent, bg=self.PANEL)
-        frame.pack(fill=tk.BOTH, expand=True, padx=S3, pady=(S2, S3))
 
-        hdr = tk.Frame(frame, bg=self.PANEL)
-        hdr.pack(fill=tk.X, pady=(0, S2))
-        tk.Label(hdr, text="DETECTION LOG",
-                 font=(FONT, 8, "bold"),
-                 bg=self.PANEL, fg=self.FG_DIM).pack(side=tk.LEFT)
-        tk.Button(hdr, text="Clear", font=(FONT, 8),
-                  bg=self.PANEL, fg=self.FG_MID,
-                  activebackground=self.SEP, activeforeground=self.FG,
-                  relief=tk.FLAT, cursor="hand2", bd=0, padx=S1,
-                  command=self._clear_log).pack(side=tk.RIGHT)
+        # The log is hidden until "Show log" is clicked.
+        bar = tk.Frame(parent, bg=self.PANEL)
+        bar.pack(fill=tk.X, padx=S3, pady=(S3, 0))
+        self._btn_log = tk.Button(
+            bar, text="▸  Show log", font=(FONT, 9, "bold"), anchor=tk.W,
+            bg=self.PANEL, fg=self.FG_MID,
+            activebackground=self.PANEL, activeforeground=self.FG,
+            relief=tk.FLAT, bd=0, cursor="hand2", padx=0,
+            command=self._toggle_log,
+        )
+        self._btn_log.pack(side=tk.LEFT)
+        self._btn_clear = tk.Button(
+            bar, text="Clear", font=(FONT, 8),
+            bg=self.PANEL, fg=self.FG_MID,
+            activebackground=self.SEP, activeforeground=self.FG,
+            relief=tk.FLAT, cursor="hand2", bd=0, padx=S1,
+            command=self._clear_log,
+        )
 
-        # height=4: ask for little, then expand into whatever space is left,
-        # so the log never pushes itself off the bottom of the sidebar.
+        self._log_frame = tk.Frame(parent, bg=self.PANEL)
+        # height=4: ask for little, then expand into whatever space is left.
         self._log = tk.Text(
-            frame, bg=self.CARD_BG, fg=self.FG, height=4,
+            self._log_frame, bg=self.CARD_BG, fg=self.FG, height=4,
             font=(MONO, 9), relief=tk.FLAT,
             wrap=tk.WORD, state=tk.DISABLED,
             padx=S2, pady=S1, spacing1=1, spacing3=1,
@@ -627,10 +627,27 @@ class HawkSightApp(tk.Tk):
         self._log.tag_configure("warn",   foreground="#e8705f")
         self._log.tag_configure("div",    foreground=self.FG_DIM)
 
-        sb = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=self._log.yview)
+        sb = ttk.Scrollbar(self._log_frame, orient=tk.VERTICAL,
+                           command=self._log.yview)
         self._log.configure(yscrollcommand=sb.set)
         sb.pack(side=tk.RIGHT, fill=tk.Y)
         self._log.pack(fill=tk.BOTH, expand=True)
+
+    @property
+    def log_visible(self) -> bool:
+        return self._log_frame.winfo_manager() != ""
+
+    def _toggle_log(self):
+        if self.log_visible:
+            self._log_frame.pack_forget()
+            self._btn_clear.pack_forget()
+            self._btn_log.config(text="▸  Show log")
+        else:
+            self._log_frame.pack(fill=tk.BOTH, expand=True,
+                                 padx=self.S3, pady=(self.S2, self.S3))
+            self._btn_clear.pack(side=tk.RIGHT)
+            self._btn_log.config(text="▾  Hide log")
+            self._log.see(tk.END)
 
     # ── Backend ───────────────────────────────────────────────────────────────
 
@@ -657,15 +674,13 @@ class HawkSightApp(tk.Tk):
         self._btn_start.config(state=tk.DISABLED)
         self._cmb_model.config(state=tk.DISABLED)
         if self._model.is_loaded or MODEL_PATHS[self._model_key].exists():
-            self._sv_status.set("Loading model…")
-            self._set_loading(
-                f"Loading {MODEL_LABELS[self._model_key]} weights…"
-            )
+            self._sv_status.set("Getting ready…")
+            self._set_loading("Getting ready, this takes a few seconds…")
         else:
             name = MODEL_PATHS[self._model_key].name
-            self._sv_status.set("Downloading model…")
+            self._sv_status.set("Downloading the detector (first time only)…")
             self._set_loading(
-                f"Downloading {name} (first use only, about 6 MB)…"
+                f"Downloading {name} (first time only, about 6 MB)…"
             )
             self._log_write(f"◆ {name} not found, downloading it once…", "div")
 
@@ -692,13 +707,13 @@ class HawkSightApp(tk.Tk):
                            f"internet connection and press START again. ({exc})")
             else:
                 message = f"⚠  Could not load model: {exc}"
-            self._start_result = (False, "Model error", message)
+            self._start_result = (False, "Detector problem", message)
             return
         if self._controller.start():
             self._start_result = (True, "", "")
         else:
             self._start_result = (
-                False, "Camera error",
+                False, "Camera problem",
                 f"⚠  Could not open {camera_label(self._camera)}. Close other "
                 "apps using it (Teams, Zoom, Camera), check Windows Settings › "
                 "Privacy & security › Camera, then press START again.")
@@ -719,13 +734,9 @@ class HawkSightApp(tk.Tk):
                 bg=self.RED, fg="white",
                 activebackground=self.RED_DK, activeforeground="white",
             )
-            self._btn_snap.config(
-                state=tk.NORMAL,
-                bg=self.BLUE, fg="white",
-                activebackground="#1f6da0", activeforeground="white",
-            )
-            self._sv_status.set("Running")
-            self._badge.config(text="● LIVE", fg=self.GREEN)
+            self._sv_status.set("Watching")
+            self._badge.config(text="● ON", fg=self.GREEN)
+            self._reset_alert()
             self._last_log_count = -1
             self._last_log_time  = 0.0
             self._log_write(f"── session started · {camera_label(self._camera)} ──",
@@ -737,8 +748,16 @@ class HawkSightApp(tk.Tk):
             self._btn_start.config(state=tk.NORMAL)
             self._cmb_model.config(state="readonly")
             self._sv_status.set(status)
-            self._badge.config(text="● ERROR", fg=self.RED)
+            self._badge.config(text="● PROBLEM", fg=self.RED)
             self._log_write(message, "warn")
+            if status == "Camera problem":
+                hint = ("Close other apps that use the camera (Teams, Zoom), "
+                        "then press START again.")
+            elif "download" in message:
+                hint = "Check the internet connection, then press START again."
+            else:
+                hint = "Try the other choice under “What to look for”."
+            self._show_idle(f"⚠  {status}", hint, "#e8705f")
 
     def _on_stop(self):
         for attr in ("_poll_id", "_timer_id", "_alert_id", "_badge_id"):
@@ -748,22 +767,37 @@ class HawkSightApp(tk.Tk):
                 setattr(self, attr, None)
 
         self._controller.stop()
-        self._display.show_message(
-            "Feed stopped  —  press  S  or  START  to resume"
-        )
-        for btn in (self._btn_stop, self._btn_snap):
-            btn.config(state=tk.DISABLED,
-                       bg=self.BTN_OFF_BG, fg=self.BTN_OFF_FG)
+        self._show_idle("Stopped", "Press START to watch again.")
+        self._btn_stop.config(state=tk.DISABLED,
+                              bg=self.BTN_OFF_BG, fg=self.BTN_OFF_FG)
         self._btn_start.config(state=tk.NORMAL)
         self._cmb_model.config(state="readonly")
         self._sv_status.set("Stopped")
         self._sv_fps.set("—")
         self._sv_runtime.set("00:00")
-        self._badge.config(text="● OFFLINE", fg=self.RED)
+        self._badge.config(text="● OFF", fg=self.RED)
         self._reset_alert()
         self._border.config(bg=self.ORANGE)
         self._log_write("── session ended ──", "div")
         self.title("HawkSight — Gas Cylinder Detection")
+
+    def _on_photo_key(self):
+        if self._controller.is_running:
+            self._on_snapshot()
+
+    def _flash_status(self, text: str, ms: int = 3000):
+        """Show `text` in the status bar for a moment, then go back."""
+        if self._status_id is None:
+            self._status_before = self._sv_status.get()
+        else:
+            self.after_cancel(self._status_id)
+        self._sv_status.set(text)
+
+        def restore():
+            self._status_id = None
+            if self._sv_status.get() == text:
+                self._sv_status.set(self._status_before)
+        self._status_id = self.after(ms, restore)
 
     def _on_snapshot(self):
         if self._last_frame is None:
@@ -777,8 +811,10 @@ class HawkSightApp(tk.Tk):
             n += 1
         if cv2.imwrite(str(path), self._last_frame):
             self._log_write(f"◎ {path.name}  saved", "snap")
+            self._flash_status(f"◎  Photo saved in the snapshots folder ({path.name})")
         else:
             self._log_write(f"⚠  Could not save {path.name}", "warn")
+            self._flash_status("⚠  Could not save the photo")
 
     def _on_model_selected(self, _=None):
         key = next((k for k in self._model_keys
@@ -874,13 +910,14 @@ class HawkSightApp(tk.Tk):
     def _on_canvas_resize(self, event=None):
         if self._controller.is_running:
             return
-        status = self._sv_status.get()
-        if status == "Idle":
+        if self._idle_msg is None:
             self._display.draw_placeholder()
         else:
-            self._display.show_message(
-                "Feed stopped  —  press  S  or  START  to resume"
-            )
+            self._display.show_message(*self._idle_msg)
+
+    def _show_idle(self, title: str, hint: str = "", color: str = "#a0a0a2"):
+        self._idle_msg = (title, hint, color)
+        self._display.show_message(*self._idle_msg)
 
     # ── Frame polling ─────────────────────────────────────────────────────────
 
@@ -910,8 +947,8 @@ class HawkSightApp(tk.Tk):
         # Window title
         n = result.count
         if n > 0:
-            word = "object" if n == 1 else "objects"
-            self.title(f"HawkSight  —  {n} {word} detected")
+            word = "cylinder" if n == 1 else "cylinders"
+            self.title(f"HawkSight  —  {n} gas {word} spotted!")
         else:
             self.title("HawkSight — Gas Cylinder Detection")
 
@@ -961,10 +998,14 @@ class HawkSightApp(tk.Tk):
             self.after_cancel(self._alert_id)
             self._alert_id = None
         bg = self.CARD_BG
+        if self._controller.is_running:
+            icon, text, fg = "✓", "All clear", self.GREEN
+        else:
+            icon, text, fg = "●", "Camera is off", self.FG_DIM
         self._alert_frame.config(bg=bg)
         self._alert_row.config(bg=bg)
-        self._alert_dot.config(bg=bg, fg=self.FG_DIM, text="●")
-        self._alert_lbl.config(bg=bg, fg=self.FG_DIM, text="MONITORING")
+        self._alert_dot.config(bg=bg, fg=fg, text=icon)
+        self._alert_lbl.config(bg=bg, fg=fg, text=text)
         self._border.config(bg=self.ORANGE)
 
     def _pulse_alert(self):
@@ -981,8 +1022,8 @@ class HawkSightApp(tk.Tk):
             border_col = self.ORANGE_DK
         self._alert_frame.config(bg=bg)
         self._alert_row.config(bg=bg)
-        self._alert_dot.config(bg=bg, fg=dot_fg, text="⚑")
-        self._alert_lbl.config(bg=bg, fg=lbl_fg, text="CYLINDER DETECTED")
+        self._alert_dot.config(bg=bg, fg=dot_fg, text="⚠")
+        self._alert_lbl.config(bg=bg, fg=lbl_fg, text="GAS CYLINDER SPOTTED!")
         self._border.config(bg=border_col)
         self._alert_id = self.after(750, self._pulse_alert)  # slower = calmer
 

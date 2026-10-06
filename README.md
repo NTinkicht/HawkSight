@@ -79,40 +79,47 @@ the desktop app with the `.venv` Python.
 
 ## Using the desktop app
 
-1. Pick a camera from the **Camera** dropdown. HawkSight scans for connected
-   cameras when it opens and lists each one as "Camera 0", "Camera 1", … (the
-   number Windows gives it). Camera 0 is shown as "(laptop)" because on a laptop
-   it is the built-in camera. If the scan finds no camera, HawkSight still offers
-   the laptop camera, and on Windows it retries with Media Foundation when
-   DirectShow can't open a camera. Plugged in a camera later? Press **⟳ Rescan**.
-   You can switch cameras while the feed is live: the old camera is released
-   and the new one starts (a camera takes a few seconds to open).
-   Set the confidence threshold with the slider (default 65 %).
-2. Pick a model from the **Detection model** dropdown: **HawkSight custom**
-   (`hawksight_custom.pt`, only listed when the file exists) or **YOLOv8n (bottle
-   proxy)**, which uses the stock COCO "bottle" class as a stand-in for cylinders.
-   The dropdown is locked while the feed is running; press STOP to change model.
-3. Press **START** or `S`. The camera takes a few seconds to open.
+1. Under **Camera**, pick a camera. HawkSight looks for cameras when it opens and
+   lists each one as "Camera 0", "Camera 1", … (the number Windows gives it).
+   Camera 0 is shown as "(laptop)" because on a laptop it is the built-in camera.
+   If no camera is found, HawkSight still offers the laptop camera, and on Windows
+   it retries with Media Foundation when DirectShow can't open a camera. Plugged
+   in a camera later? Press **⟳ Find cameras**. You can switch cameras while the
+   camera is on: the old one is released and the new one starts (a camera takes a
+   few seconds to open).
+2. Under **What to look for**, pick a detector:
+   **HawkSight (best for cylinders)** (`hawksight_custom.pt`, only listed when
+   the file exists) or **Basic YOLOv8n (spots bottles)**, which uses the stock
+   COCO "bottle" class as a stand-in for cylinders. This choice is locked while
+   the camera is on; press STOP to change it.
+3. **How sure before it alerts** sets the confidence threshold (default 65 %).
+4. Press the green **START** button (or `S`). The camera takes a few seconds to open.
 
 | Key | Action |
 |-----|--------|
 | `S` | Start |
 | `X` | Stop |
-| `P` | Save a snapshot to `snapshots/` (git-ignored) |
-| `F9` | Toggle fullscreen |
-| `Esc` | Exit fullscreen |
+| `P` | Take a photo while the camera is on, saved to `snapshots/` (git-ignored) |
+| `F9` | Toggle full screen |
+| `Esc` | Exit full screen |
 
-The sidebar has four sections:
-- **Status:** four counters and the alert banner, which flashes
-  "CYLINDER DETECTED" while a cylinder is in view.
-  - **Objects:** cylinders in the current frame
-  - **Confidence:** best confidence in the current frame
-  - **Runtime:** time since START
-  - **Alerts:** how many separate sightings this session
-- **Controls:** START, plus STOP and SNAPSHOT side by side.
-- **Settings:** the **Detection model** and **Camera** dropdowns, the **⟳ Rescan**
-  button, and the confidence slider.
-- **Detection log:** sightings, snapshots, model and camera changes, and errors.
+There is no photo button; use `P`. The status bar at the bottom confirms each photo.
+
+The sidebar has these parts:
+- **Right now:** a banner that says "Camera is off", "✓ All clear", or flashes
+  "GAS CYLINDER SPOTTED!", plus four counters:
+  - **Cylinders now:** cylinders in the current frame
+  - **How sure:** best confidence in the current frame
+  - **Time on:** time since START
+  - **Times spotted:** how many separate sightings this session
+- **Camera on / off:** START and STOP.
+- **Settings:** **What to look for**, **Camera** with **⟳ Find cameras**, and
+  **How sure before it alerts**.
+- **Show log:** hidden until clicked. Lists sightings, photos, detector and
+  camera changes, and problems.
+
+If something goes wrong (camera won't open, detector won't load or download),
+the video area says what happened and what to do next in plain words.
 
 ## How detection works
 
@@ -122,8 +129,8 @@ The sidebar has four sections:
   seen in **5 frames in a row**, which filters out one-frame false alarms.
 - Confirmed cylinders get a green box and confidence label, and the alert
   banner and video border pulse.
-- If the model fails to load or the camera can't open, the app shows the error
-  and the reason in the log, and START works again.
+- If the model fails to load or the camera can't open, the video area explains
+  the problem, the log has the details, and START works again.
 
 ## Tests
 

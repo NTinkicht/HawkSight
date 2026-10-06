@@ -194,7 +194,6 @@ class HawkSightApp(tk.Tk):
         self._last_log_count: int   = -1
         self._last_log_time:  float = 0.0
         self._poll_id:  Optional[str] = None
-        self._timer_id: Optional[str] = None
         self._alert_id: Optional[str] = None
         self._badge_id: Optional[str] = None
         self._alert_state = False
@@ -423,8 +422,7 @@ class HawkSightApp(tk.Tk):
         sb.pack(side=tk.RIGHT, fill=tk.Y)
         sb.pack_propagate(False)
 
-        self._build_alert_banner(self._section(sb, "Right now"))
-        self._build_stat_cards(self._sidebar_last)
+        self._build_indicator(sb)
         self._build_controls(self._section(sb, "Camera on / off"))
         self._build_settings(self._section(sb, "Settings"))
         self._build_log(sb)
@@ -435,64 +433,39 @@ class HawkSightApp(tk.Tk):
         tk.Label(frame, text=title.upper(), font=(FONT, 8, "bold"),
                  bg=self.PANEL, fg=self.FG_DIM).pack(anchor=tk.W,
                                                      pady=(0, self.S2))
-        self._sidebar_last = frame
         return frame
 
-    # ── Stat cards (2 × 2 grid) ───────────────────────────────────────────────
+    # ── Detection light ───────────────────────────────────────────────────────
+    # One small row: a light that blinks red while a cylinder is spotted,
+    # and how sure the detector is about it.
 
-    def _make_card(self, parent, title: str, var: tk.StringVar,
-                   accent: str, val_color: str) -> tk.Frame:
-        f = tk.Frame(parent, bg=self.CARD_BG)
-        tk.Frame(f, bg=accent, height=3).pack(fill=tk.X)
-        tk.Label(f, text=title.upper(),
-                 font=(FONT, 8, "bold"),
-                 bg=self.CARD_BG, fg=self.FG_DIM).pack(pady=(self.S1, 0))
-        tk.Label(f, textvariable=var,
-                 font=(MONO, 17, "bold"),
-                 bg=self.CARD_BG, fg=val_color).pack(pady=(0, self.S1))
-        return f
+    LIGHT_OFF = "#4a4a4c"
+    LIGHT_ON  = "#ff3b30"
+    LIGHT_DIM = "#8a1c16"
 
-    def _build_stat_cards(self, parent):
-        self._sv_objects = tk.StringVar(value="0")
-        self._sv_best    = tk.StringVar(value="—")
-        self._sv_runtime = tk.StringVar(value="00:00")
-        self._sv_total   = tk.StringVar(value="0")
+    def _build_indicator(self, parent):
+        S2, S3 = self.S2, self.S3
+        box = tk.Frame(parent, bg=self.CARD_BG)
+        box.pack(fill=tk.X, padx=S3, pady=(S3, 0))
+        row = tk.Frame(box, bg=self.CARD_BG)
+        row.pack(fill=tk.X, padx=S3, pady=S2)
 
-        grid = tk.Frame(parent, bg=self.PANEL)
-        grid.pack(fill=tk.X, pady=(self.S2, 0))
+        self._light = tk.Canvas(row, width=18, height=18, bg=self.CARD_BG,
+                                highlightthickness=0)
+        self._light_dot = self._light.create_oval(
+            2, 2, 16, 16, fill=self.LIGHT_OFF, outline="")
+        self._light.pack(side=tk.LEFT)
 
-        c1 = self._make_card(grid, "Cylinders now", self._sv_objects, self.ORANGE, self.ORANGE)
-        c2 = self._make_card(grid, "How sure",      self._sv_best,    self.GREEN,  self.GREEN)
-        c3 = self._make_card(grid, "Time on",       self._sv_runtime, self.BLUE,   self.FG)
-        c4 = self._make_card(grid, "Times spotted", self._sv_total,   self.PURPLE, self.FG)
+        tk.Label(row, text="How sure", font=(FONT, 10, "bold"),
+                 bg=self.CARD_BG, fg=self.FG_MID).pack(side=tk.LEFT,
+                                                      padx=(S2, 0))
+        self._sv_best = tk.StringVar(value="—")
+        tk.Label(row, textvariable=self._sv_best, font=(MONO, 14, "bold"),
+                 bg=self.CARD_BG, fg=self.FG).pack(side=tk.RIGHT)
 
-        g = self.S1
-        c1.grid(row=0, column=0, sticky="nsew", padx=(0, g), pady=(0, g))
-        c2.grid(row=0, column=1, sticky="nsew", padx=(g, 0), pady=(0, g))
-        c3.grid(row=1, column=0, sticky="nsew", padx=(0, g), pady=(g, 0))
-        c4.grid(row=1, column=1, sticky="nsew", padx=(g, 0), pady=(g, 0))
-        grid.columnconfigure(0, weight=1)
-        grid.columnconfigure(1, weight=1)
-
-    # ── Alert banner ──────────────────────────────────────────────────────────
-
-    def _build_alert_banner(self, parent):
-        self._alert_frame = tk.Frame(parent, bg=self.CARD_BG)
-        self._alert_frame.pack(fill=tk.X)
-
-        # Icon and text sit together, centred as one group.
-        row = tk.Frame(self._alert_frame, bg=self.CARD_BG)
-        row.pack(pady=self.S2)
-        self._alert_row = row
-        self._alert_dot = tk.Label(
-            row, text="●", font=(FONT, 12), bg=self.CARD_BG, fg=self.FG_DIM,
-        )
-        self._alert_dot.pack(side=tk.LEFT, padx=(0, self.S2))
-        self._alert_lbl = tk.Label(
-            row, text="Camera is off",
-            font=(FONT, 11, "bold"), bg=self.CARD_BG, fg=self.FG_DIM,
-        )
-        self._alert_lbl.pack(side=tk.LEFT)
+    @property
+    def light_color(self) -> str:
+        return self._light.itemcget(self._light_dot, "fill")
 
     # ── Controls ──────────────────────────────────────────────────────────────
 
@@ -742,7 +715,6 @@ class HawkSightApp(tk.Tk):
             self._log_write(f"── session started · {camera_label(self._camera)} ──",
                             "div")
             self._poll_id  = self.after(30,   self._poll_frames)
-            self._timer_id = self.after(1000, self._tick_timer)
             self._badge_id = self.after(900,  self._pulse_live_badge)
         else:
             self._btn_start.config(state=tk.NORMAL)
@@ -760,7 +732,7 @@ class HawkSightApp(tk.Tk):
             self._show_idle(f"⚠  {status}", hint, "#e8705f")
 
     def _on_stop(self):
-        for attr in ("_poll_id", "_timer_id", "_alert_id", "_badge_id"):
+        for attr in ("_poll_id", "_alert_id", "_badge_id"):
             after_id = getattr(self, attr)
             if after_id:
                 self.after_cancel(after_id)
@@ -774,7 +746,7 @@ class HawkSightApp(tk.Tk):
         self._cmb_model.config(state="readonly")
         self._sv_status.set("Stopped")
         self._sv_fps.set("—")
-        self._sv_runtime.set("00:00")
+        self._sv_best.set("—")
         self._badge.config(text="● OFF", fg=self.RED)
         self._reset_alert()
         self._border.config(bg=self.ORANGE)
@@ -937,10 +909,8 @@ class HawkSightApp(tk.Tk):
             self._poll_id = self.after(30, self._poll_frames)
 
     def _update_stats(self, result: DetectionResult):
-        self._sv_objects.set(str(result.count))
         conf = result.best_confidence
         self._sv_best.set(f"{conf:.0%}" if conf > 0 else "—")
-        self._sv_total.set(str(self._controller.total_detections))
         fps = self._controller.fps
         self._sv_fps.set(f"{fps:.1f}" if fps > 0 else "—")
 
@@ -977,16 +947,6 @@ class HawkSightApp(tk.Tk):
             self._last_log_count = result.count
             self._last_log_time  = now
 
-    def _tick_timer(self):
-        if self._controller.is_running:
-            secs = int(self._controller.runtime)
-            m, s = divmod(secs, 60)
-            h, m = divmod(m, 60)
-            self._sv_runtime.set(
-                f"{h:02d}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
-            )
-            self._timer_id = self.after(1000, self._tick_timer)
-
     # ── Animations ────────────────────────────────────────────────────────────
 
     def _start_alert(self):
@@ -997,35 +957,16 @@ class HawkSightApp(tk.Tk):
         if self._alert_id:
             self.after_cancel(self._alert_id)
             self._alert_id = None
-        bg = self.CARD_BG
-        if self._controller.is_running:
-            icon, text, fg = "✓", "All clear", self.GREEN
-        else:
-            icon, text, fg = "●", "Camera is off", self.FG_DIM
-        self._alert_frame.config(bg=bg)
-        self._alert_row.config(bg=bg)
-        self._alert_dot.config(bg=bg, fg=fg, text=icon)
-        self._alert_lbl.config(bg=bg, fg=fg, text=text)
+        self._light.itemconfig(self._light_dot, fill=self.LIGHT_OFF)
         self._border.config(bg=self.ORANGE)
 
     def _pulse_alert(self):
         self._alert_state = not self._alert_state
-        if self._alert_state:
-            bg         = self.ORANGE
-            dot_fg     = "white"
-            lbl_fg     = "white"
-            border_col = self.ORANGE_LT
-        else:
-            bg         = "#3c2010"   # softer dark amber — much easier than #2a0e00
-            dot_fg     = self.ORANGE_LT
-            lbl_fg     = self.ORANGE_LT
-            border_col = self.ORANGE_DK
-        self._alert_frame.config(bg=bg)
-        self._alert_row.config(bg=bg)
-        self._alert_dot.config(bg=bg, fg=dot_fg, text="⚠")
-        self._alert_lbl.config(bg=bg, fg=lbl_fg, text="GAS CYLINDER SPOTTED!")
-        self._border.config(bg=border_col)
-        self._alert_id = self.after(750, self._pulse_alert)  # slower = calmer
+        on = self._alert_state
+        self._light.itemconfig(self._light_dot,
+                               fill=self.LIGHT_ON if on else self.LIGHT_DIM)
+        self._border.config(bg=self.ORANGE_LT if on else self.ORANGE_DK)
+        self._alert_id = self.after(500, self._pulse_alert)
 
     def _pulse_live_badge(self):
         if not self._controller.is_running:

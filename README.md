@@ -3,7 +3,7 @@
 HawkSight watches a live camera feed and alerts you when it sees a gas cylinder.
 It uses a YOLO object-detection model and comes in two forms:
 
-- **Desktop app** (`hawksight_app.py`): video panel, live stats, alert banner,
+- **Desktop app** (`hawksight_app.py`): video panel, a red detection light with "How sure",
   snapshots, and a detection log.
 - **Command-line tool** (`hawksight.py`): a plain OpenCV preview window.
 
@@ -105,13 +105,10 @@ the desktop app with the `.venv` Python.
 
 There is no photo button; use `P`. The status bar at the bottom confirms each photo.
 
-The sidebar has these parts:
-- **Right now:** a banner that says "Camera is off", "✓ All clear", or flashes
-  "GAS CYLINDER SPOTTED!", plus four counters:
-  - **Cylinders now:** cylinders in the current frame
-  - **How sure:** best confidence in the current frame
-  - **Time on:** time since START
-  - **Times spotted:** how many separate sightings this session
+The sidebar has these parts, from the top:
+- **Light + How sure:** a small light that blinks red while a gas cylinder is
+  spotted, next to how sure the detector is (for example 87 %). Grey means
+  nothing is spotted or the camera is off.
 - **Camera on / off:** START and STOP.
 - **Settings:** **What to look for**, **Camera** with **⟳ Find cameras**, and
   **How sure before it alerts**.
@@ -128,7 +125,7 @@ the video area says what happened and what to do next in plain words.
 - Each frame goes through the model. A cylinder counts only after it has been
   seen in **5 frames in a row**, which filters out one-frame false alarms.
 - Confirmed cylinders get a green box and confidence label, and the alert
-  banner and video border pulse.
+  light and the video border blink.
 - If the model fails to load or the camera can't open, the video area explains
   the problem, the log has the details, and START works again.
 

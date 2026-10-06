@@ -11,6 +11,7 @@ import numpy as np
 
 import hawksight_app
 from hawksight_app import HawkSightApp
+from src.core import DetectionResult
 
 
 def _pump_until(app, condition, timeout=5.0):
@@ -253,8 +254,25 @@ class EasyUiTest(AppTestCase):
         self.app.update()
         self.assertFalse(self.app.log_visible)
 
-    def test_alert_banner_says_camera_is_off_at_start(self):
-        self.assertEqual(self.app._alert_lbl["text"], "Camera is off")
+    def test_light_is_off_until_a_cylinder_is_spotted(self):
+        self.assertEqual(self.app.light_color, self.app.LIGHT_OFF)
+        self.assertEqual(self.app._sv_best.get(), "—")
+
+        hit = DetectionResult(boxes=[(1, 1, 5, 5)], labels=["Gas Cylinder"],
+                              confidences=[0.87])
+        self.app._update_stats(hit)
+        self.app.update()
+        self.assertIn(self.app.light_color,
+                      (self.app.LIGHT_ON, self.app.LIGHT_DIM))
+        self.assertEqual(self.app._sv_best.get(), "87%")
+
+        self.app._update_stats(DetectionResult())
+        self.assertEqual(self.app.light_color, self.app.LIGHT_OFF)
+        self.assertEqual(self.app._sv_best.get(), "—")
+
+    def test_counters_are_gone(self):
+        for name in ("_sv_objects", "_sv_runtime", "_sv_total", "_alert_lbl"):
+            self.assertFalse(hasattr(self.app, name), name)
 
     def test_camera_problem_is_shown_on_the_video_area(self):
         class Unopenable(FakeVideo):

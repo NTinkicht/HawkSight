@@ -79,7 +79,12 @@ the desktop app with the `.venv` Python.
 
 ## Using the desktop app
 
-1. Pick the camera number and confidence threshold in the sidebar (default 65 %).
+1. Pick a camera from the **Camera** dropdown. HawkSight scans for connected
+   cameras when it opens and lists each one as "Camera 0", "Camera 1", … (the
+   number Windows gives it). Plugged in a camera later? Press **⟳** to rescan.
+   You can switch cameras while the feed is live: the old camera is released
+   and the new one starts (a camera takes a few seconds to open).
+   Set the confidence threshold with the slider (default 65 %).
 2. Pick a model from the **Detection model** dropdown: **HawkSight custom**
    (`hawksight_custom.pt`, only listed when the file exists) or **YOLOv8n (bottle
    proxy)**, which uses the stock COCO "bottle" class as a stand-in for cylinders.
@@ -120,3 +125,6 @@ The sidebar shows:
 ## Known issues
 
 - In the command-line preview, the window title shows `\u2014` instead of a dash.
+- The Camera dropdown shows camera numbers, not device names: OpenCV can't read
+  names, and listing them would need an extra package. Up to 6 cameras (0–5)
+  are checked.

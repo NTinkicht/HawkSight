@@ -23,13 +23,40 @@ def _pump_until(app, condition, timeout=5.0):
     return False
 
 
+class FakeVideo:
+    """Stands in for VideoSource: a camera that always delivers a frame."""
+    opened = []
+
+    def __init__(self, source):
+        self.source   = source
+        self.released = False
+
+    def open(self):
+        FakeVideo.opened.append(self)
+        return True
+
+    def read(self):
+        time.sleep(0.01)
+        return None if self.released else np.zeros((20, 20, 3), np.uint8)
+
+    def release(self):
+        self.released = True
+
+
 class AppTestCase(unittest.TestCase):
+    CAMERAS = [0]   # what the camera scan finds; no real webcam is touched
+
     def setUp(self):
+        patcher = mock.patch.object(hawksight_app, "list_cameras",
+                                    lambda assume_present=(): list(self.CAMERAS))
+        patcher.start()
+        self.addCleanup(patcher.stop)
         try:
             self.app = HawkSightApp()
         except tk.TclError as exc:
             self.skipTest(f"Tk unavailable: {exc}")
-        self.app.update()
+        self.assertTrue(_pump_until(self.app, lambda: not self.app._scanning),
+                        "camera scan never finished")
 
     def tearDown(self):
         self.app.on_close()
@@ -134,6 +161,70 @@ class ModelDropdownTest(AppTestCase):
         _pump_until(self.app,
                     lambda: str(self.app._btn_start["state"]) == tk.NORMAL)
         self.assertEqual(str(self.app._cmb_model["state"]), "readonly")
+
+
+class CameraDropdownTest(AppTestCase):
+    CAMERAS = [0, 2]
+
+    def setUp(self):
+        super().setUp()
+        FakeVideo.opened = []
+        patcher = mock.patch.object(hawksight_app, "VideoSource", FakeVideo)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.app._model.load = lambda: None
+
+    def choose(self, label):
+        self.app._sv_camera.set(label)
+        self.app._cmb_camera.event_generate("<<ComboboxSelected>>")
+        self.app.update()
+
+    def start_and_wait(self):
+        self.app._on_start()
+        self.assertTrue(_pump_until(
+            self.app, lambda: self.app._sv_status.get() == "Running"))
+
+    def test_dropdown_lists_connected_cameras(self):
+        self.assertEqual(list(self.app._cmb_camera["values"]),
+                         ["Camera 0", "Camera 2"])
+        self.assertEqual(self.app._sv_camera.get(), "Camera 0")
+        self.assertEqual(str(self.app._cmb_camera["state"]), "readonly")
+
+    def test_start_uses_the_chosen_camera(self):
+        self.choose("Camera 2")
+        self.start_and_wait()
+        self.assertEqual([v.source for v in FakeVideo.opened], [2])
+
+    def test_switching_while_live_stops_old_feed_and_starts_new(self):
+        self.start_and_wait()
+        old = FakeVideo.opened[-1]
+        self.choose("Camera 2")
+        self.assertTrue(old.released, "old camera was not released")
+        self.start_and_wait()
+        new = FakeVideo.opened[-1]
+        self.assertEqual(new.source, 2)
+        self.assertFalse(new.released)
+        self.assertTrue(self.app._controller.is_running)
+        self.assertIn("camera switched", self.log_text())
+
+    def test_rescan_picks_up_new_camera_and_keeps_selection(self):
+        self.choose("Camera 2")
+        self.CAMERAS = [0, 1, 2]
+        self.app._btn_rescan.invoke()
+        _pump_until(self.app, lambda: not self.app._scanning)
+        self.assertEqual(list(self.app._cmb_camera["values"]),
+                         ["Camera 0", "Camera 1", "Camera 2"])
+        self.assertEqual(self.app._sv_camera.get(), "Camera 2")
+
+    def test_no_camera_found_blocks_start_with_a_message(self):
+        self.CAMERAS = []
+        self.app._btn_rescan.invoke()
+        _pump_until(self.app, lambda: not self.app._scanning)
+        self.assertEqual(self.app._sv_camera.get(), "No camera found")
+        self.app._on_start()
+        self.assertEqual(FakeVideo.opened, [])
+        self.assertIn("No camera found", self.log_text())
+        self.assertEqual(str(self.app._btn_start["state"]), tk.NORMAL)
 
 
 class SnapshotTest(AppTestCase):

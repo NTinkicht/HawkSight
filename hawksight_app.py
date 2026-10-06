@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from src.core import (
     CUSTOM_PT, DEFAULT_CONF, DEFAULT_MODEL, YOLO_PT,
     DetectionResult, VideoSource, DetectionModel,
-    FrameProcessor, SystemController,
+    FrameProcessor, SystemController, list_cameras,
 )
 
 # ─── Paths ───────────────────────────────────────────────────────────────────
@@ -182,6 +182,10 @@ class HawkSightApp(tk.Tk):
         self._alert_state = False
         self._badge_state = True
         self._model_key = DEFAULT_MODEL_KEY
+        self._cameras: list[int] = []        # indices found by the last scan
+        self._camera:  Optional[int] = None  # selected camera index
+        self._scanning = False
+        self._starting = False
         self._is_fullscreen = False
 
         self._load_icon()
@@ -190,6 +194,7 @@ class HawkSightApp(tk.Tk):
         self._init_backend()
         self._bind_keys()
         self.after(160, self._display.draw_placeholder)
+        self._scan_cameras()
 
     # ── Window icon ───────────────────────────────────────────────────────────
 
@@ -523,21 +528,29 @@ class HawkSightApp(tk.Tk):
         self._cmb_model.pack(fill=tk.X, pady=(4, 0))
         self._cmb_model.bind("<<ComboboxSelected>>", self._on_model_selected)
 
-        # Camera source row
+        # Camera dropdown + rescan button
         row1 = tk.Frame(cfg, bg=self.PANEL)
-        row1.pack(fill=tk.X, pady=(0, 7))
-        tk.Label(row1, text="Camera source",
-                 font=(FONT, 9), bg=self.PANEL, fg=self.FG_MID).pack(side=tk.LEFT)
-        self._sv_source = tk.StringVar(value="0")
-        tk.Spinbox(
-            row1, from_=0, to=5,
-            textvariable=self._sv_source,
-            width=3, font=(FONT, 10), justify=tk.CENTER,
-            bg=self.CARD_BG, fg=self.FG,
-            buttonbackground=self.SEP, relief=tk.FLAT, bd=0,
-            highlightthickness=1,
-            highlightcolor=self.ORANGE, highlightbackground=self.SEP,
-        ).pack(side=tk.RIGHT, ipady=3)
+        row1.pack(fill=tk.X, pady=(0, 9))
+        tk.Label(row1, text="Camera",
+                 font=(FONT, 9), bg=self.PANEL, fg=self.FG_MID).pack(anchor=tk.W)
+
+        cam_row = tk.Frame(row1, bg=self.PANEL)
+        cam_row.pack(fill=tk.X, pady=(4, 0))
+        self._btn_rescan = tk.Button(
+            cam_row, text="⟳", font=(FONT, 11), width=3,
+            bg=self.CARD_BG, fg=self.FG_MID,
+            activebackground=self.SEP, activeforeground=self.ORANGE,
+            relief=tk.FLAT, bd=0, cursor="hand2",
+            command=self._scan_cameras,
+        )
+        self._btn_rescan.pack(side=tk.RIGHT, fill=tk.Y, padx=(6, 0))
+        self._sv_camera = tk.StringVar(value="Scanning for cameras…")
+        self._cmb_camera = ttk.Combobox(
+            cam_row, textvariable=self._sv_camera, state=tk.DISABLED,
+            style="Dark.TCombobox", font=(FONT, 9),
+        )
+        self._cmb_camera.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self._cmb_camera.bind("<<ComboboxSelected>>", self._on_camera_selected)
 
         # Confidence slider row
         row2 = tk.Frame(cfg, bg=self.PANEL)
@@ -609,8 +622,18 @@ class HawkSightApp(tk.Tk):
     # ── Handlers ──────────────────────────────────────────────────────────────
 
     def _on_start(self):
-        if self._controller.is_running:
+        if self._controller.is_running or self._starting:
             return
+        if self._scanning:
+            self._log_write("Still looking for cameras, try again in a moment.",
+                            "div")
+            return
+        if self._camera is None:
+            self._log_write("⚠  No camera found. Connect one and press ⟳ "
+                            "to rescan.", "warn")
+            return
+        self._starting = True
+        self._set_camera_controls()
         self._btn_start.config(state=tk.DISABLED)
         self._cmb_model.config(state=tk.DISABLED)
         if self._model.is_loaded or MODEL_PATHS[self._model_key].exists():
@@ -626,13 +649,8 @@ class HawkSightApp(tk.Tk):
             )
             self._log_write(f"◆ {name} not found, downloading it once…", "div")
 
-        try:
-            src = int(self._sv_source.get())
-        except ValueError:
-            src = 0
-
         self._model.conf = self._sv_conf.get()
-        self._video      = VideoSource(src)
+        self._video      = VideoSource(self._camera)
         self._controller = SystemController(
             self._video, self._model, self._processor
         )
@@ -669,6 +687,8 @@ class HawkSightApp(tk.Tk):
         self._post_start(*self._start_result)
 
     def _post_start(self, ok: bool, status: str, message: str):
+        self._starting = False
+        self._set_camera_controls()
         self._lbl_loading.config(text="")
         if ok:
             self._btn_stop.config(
@@ -685,7 +705,8 @@ class HawkSightApp(tk.Tk):
             self._badge.config(text="● LIVE", fg=self.GREEN)
             self._last_log_count = -1
             self._last_log_time  = 0.0
-            self._log_write("── session started ──", "div")
+            self._log_write(f"── session started · Camera {self._camera} ──",
+                            "div")
             self._poll_id  = self.after(30,   self._poll_frames)
             self._timer_id = self.after(1000, self._tick_timer)
             self._badge_id = self.after(900,  self._pulse_live_badge)
@@ -762,6 +783,67 @@ class HawkSightApp(tk.Tk):
         self._sv_model.set(MODEL_LABELS[key])
         self._sv_footer.set(f"{MODEL_LABELS[key]} · HawkSight v2.0 · CIS 4913")
         self._log_write(f"◆ model switched → {MODEL_LABELS[key]}", "div")
+
+    # ── Cameras ───────────────────────────────────────────────────────────────
+
+    def _set_camera_controls(self):
+        # Locked while scanning or while a feed is starting up; otherwise the
+        # camera can be changed, including while the feed is live.
+        busy = self._scanning or self._starting
+        self._btn_rescan.config(state=tk.DISABLED if busy else tk.NORMAL)
+        self._cmb_camera.config(
+            state=tk.DISABLED if busy or not self._cameras else "readonly")
+
+    def _scan_cameras(self):
+        if self._scanning or self._starting:
+            return
+        self._scanning = True
+        self._set_camera_controls()
+        self._sv_camera.set("Scanning for cameras…")
+        # The live camera may refuse a second open, so don't probe it.
+        live = (self._video.source,) if self._controller.is_running else ()
+        found: list = []
+
+        def work():
+            try:
+                found.append(list_cameras(assume_present=live))
+            except Exception:
+                found.append([])
+        threading.Thread(target=work, daemon=True).start()
+        self.after(100, self._wait_for_scan, found)
+
+    def _wait_for_scan(self, found: list):
+        if not found:
+            self.after(100, self._wait_for_scan, found)
+            return
+        self._scanning = False
+        self._cameras  = found[0]
+        self._cmb_camera.config(values=[f"Camera {i}" for i in self._cameras])
+        if self._camera not in self._cameras:
+            self._camera = self._cameras[0] if self._cameras else None
+        if self._camera is None:
+            self._sv_camera.set("No camera found")
+            self._log_write("⚠  No camera found. Connect one and press ⟳ "
+                            "to rescan.", "warn")
+        else:
+            self._sv_camera.set(f"Camera {self._camera}")
+            n = len(self._cameras)
+            self._log_write(f"◆ {n} camera{'s' if n != 1 else ''} found", "div")
+        self._set_camera_controls()
+
+    def _on_camera_selected(self, _=None):
+        self._cmb_camera.selection_clear()
+        label = self._sv_camera.get()
+        index = next((i for i in self._cameras if f"Camera {i}" == label), None)
+        if index is None or index == self._camera:
+            self._sv_camera.set(f"Camera {self._camera}")
+            return
+        self._camera = index
+        self._log_write(f"◆ camera switched → Camera {index}", "div")
+        if self._controller.is_running:
+            # Release the old camera completely before opening the new one.
+            self._on_stop()
+            self._on_start()
 
     def _on_conf_change(self, _=None):
         v = self._sv_conf.get()

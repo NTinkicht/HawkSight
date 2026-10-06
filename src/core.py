@@ -23,6 +23,39 @@ CUSTOM_PT  = ROOT / "hawksight_custom.pt"
 # Prefer the purpose-trained model when it is present.
 DEFAULT_MODEL = CUSTOM_PT if CUSTOM_PT.exists() else YOLO_PT
 DEFAULT_CONF  = 0.65
+MAX_CAMERAS   = 6      # camera indices 0..5 are checked when scanning
+
+
+def _camera_backend() -> int:
+    # On Windows, OpenCV's default camera driver (Media Foundation) takes
+    # 16-21 s to open on the dev webcam; DirectShow takes 3-4 s.
+    return cv2.CAP_DSHOW if sys.platform == "win32" else cv2.CAP_ANY
+
+
+def list_cameras(max_index: int = MAX_CAMERAS,
+                 assume_present: tuple = ()) -> list[int]:
+    """Indices of the cameras that can be opened. OpenCV has no way to list
+    devices, so each index is tried in turn. A camera that is already in use
+    may refuse a second open, so indices in `assume_present` (e.g. the live
+    feed) are listed without being opened. Slow: call off the UI thread."""
+    found = []
+    # Every empty index makes OpenCV print a warning; hide them while probing.
+    log_level = cv2.utils.logging.getLogLevel()
+    cv2.utils.logging.setLogLevel(cv2.utils.logging.LOG_LEVEL_ERROR)
+    try:
+        for i in range(max_index):
+            if i in assume_present:
+                found.append(i)
+                continue
+            cap = cv2.VideoCapture(i, _camera_backend())
+            try:
+                if cap.isOpened():
+                    found.append(i)
+            finally:
+                cap.release()
+    finally:
+        cv2.utils.logging.setLogLevel(log_level)
+    return found
 
 
 # ─── Data ────────────────────────────────────────────────────────────────────
@@ -63,10 +96,7 @@ class VideoSource:
 
     def open(self) -> bool:
         is_camera = isinstance(self._source, int)
-        # On Windows, OpenCV's default camera driver (Media Foundation) takes
-        # 16-21 s to open on the dev webcam; DirectShow takes 3-4 s.
-        backend = (cv2.CAP_DSHOW if is_camera and sys.platform == "win32"
-                   else cv2.CAP_ANY)
+        backend   = _camera_backend() if is_camera else cv2.CAP_ANY
         self._cap = cv2.VideoCapture(self._source, backend)
         if not self._cap.isOpened():
             return False
@@ -113,6 +143,10 @@ class VideoSource:
         if self._cap:
             self._cap.release()
             self._cap = None
+
+    @property
+    def source(self) -> Union[int, str]:
+        return self._source
 
     def is_open(self) -> bool:
         return self._cap is not None and self._cap.isOpened()

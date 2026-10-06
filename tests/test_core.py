@@ -131,5 +131,35 @@ class VideoSourceTest(unittest.TestCase):
         self.assertEqual(video._cap.backend, core.cv2.CAP_ANY)
 
 
+class ListCamerasTest(unittest.TestCase):
+    def fake_capture(self, connected, opened):
+        class Capture:
+            def __init__(self, index, backend=0):
+                self.index = index
+                opened.append(index)
+
+            def isOpened(self):
+                return self.index in connected
+
+            def release(self):
+                pass
+        return Capture
+
+    def test_lists_only_cameras_that_open(self):
+        opened = []
+        with mock.patch.object(core.cv2, "VideoCapture",
+                               self.fake_capture({0, 2}, opened)):
+            self.assertEqual(core.list_cameras(max_index=4), [0, 2])
+        self.assertEqual(opened, [0, 1, 2, 3])
+
+    def test_camera_in_use_is_listed_without_opening_it(self):
+        opened = []
+        with mock.patch.object(core.cv2, "VideoCapture",
+                               self.fake_capture({0}, opened)):
+            found = core.list_cameras(max_index=3, assume_present=(1,))
+        self.assertEqual(found, [0, 1])
+        self.assertNotIn(1, opened)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -3,8 +3,9 @@
 HawkSight watches a live camera feed and alerts you when it sees a gas cylinder.
 It uses a YOLO object-detection model and comes in two forms:
 
-- **Desktop app** (`hawksight_app.py`): video panel, live stats, alert banner,
-  snapshots, and a detection log.
+- **Desktop app** (`hawksight_app.py`): live video with green boxes, a red
+  detection light with "How sure", screenshots, a 15-second replay, camera and
+  model dropdowns, and a detection log.
 - **Command-line tool** (`hawksight.py`): a plain OpenCV preview window.
 
 ## Project layout
@@ -29,9 +30,14 @@ It uses a YOLO object-detection model and comes in two forms:
 | Classes | 1: `gas_cylinder` |
 | Accuracy | **71.6% mAP50-95** on a held-out test set |
 
-The app shows each detection as "Gas Cylinder". If `hawksight_custom.pt` is
-missing, the app falls back to stock `yolov8n.pt`, using the COCO "bottle" class
-as a rough stand-in.
+The app shows each detection as "Gas Cylinder". You can also run the stock
+**YOLOv8n** model (`yolov8n.pt`), which uses the COCO "bottle" class as a rough
+stand-in for cylinders. It is also the fallback when `hawksight_custom.pt` is missing.
+
+`yolov8n.pt` is not stored in the repo. The first time you start with YOLOv8n,
+HawkSight downloads it (about 6 MB) from the official Ultralytics GitHub release
+and shows "Downloading yolov8n.pt…". This needs an internet connection once; if the
+download fails, the log says so and START works again.
 
 ## Setup (once)
 
@@ -74,24 +80,60 @@ the desktop app with the `.venv` Python.
 
 ## Using the desktop app
 
-1. Pick the camera number and confidence threshold in the sidebar (default 65 %).
-2. Choose the model: **Custom** (`hawksight_custom.pt`) or **YOLOv8n**, which
-   uses the stock COCO "bottle" class as a stand-in for cylinders.
-3. Press **START** or `S`. The camera takes a few seconds to open.
+1. Under **Camera**, pick a camera. HawkSight looks for cameras when it opens and
+   lists each one as "Camera 0", "Camera 1", … (the number Windows gives it).
+   Camera 0 is shown as "(laptop)" because on a laptop it is the built-in camera.
+   If no camera is found, HawkSight still offers the laptop camera, and on Windows
+   it retries with Media Foundation when DirectShow can't open a camera. Plugged
+   in a camera later? Press **⟳ Find cameras**. You can switch cameras while the
+   camera is on: the old one is released and the new one starts (a camera takes a
+   few seconds to open).
+2. Under **What to look for**, pick a detector:
+   **HawkSight (best for cylinders)** (`hawksight_custom.pt`, only listed when
+   the file exists) or **Basic YOLOv8n (spots bottles)**, which uses the stock
+   COCO "bottle" class as a stand-in for cylinders. This choice is locked while
+   the camera is on; press STOP to change it.
+3. **How sure before it alerts** sets the confidence threshold (default 65 %).
+4. Press the green **START** button (or `S`). The camera takes a few seconds to open.
 
 | Key | Action |
 |-----|--------|
 | `S` | Start |
 | `X` | Stop |
-| `P` | Save a snapshot to `snapshots/` (git-ignored) |
-| `F9` | Toggle fullscreen |
-| `Esc` | Exit fullscreen |
+| `P` | Screenshot while the camera is on, saved to `snapshots/` (git-ignored) |
+| `R` | Replay the last 15 seconds |
+| `C` | Continue live (end the replay) |
+| `F9` | Toggle full screen |
+| `Esc` | Exit full screen |
 
-The sidebar shows:
-- **Objects:** cylinders in the current frame
-- **Confidence:** best confidence in the current frame
-- **Runtime:** time since START
-- **Alerts:** how many separate sightings this session
+Two buttons at the top of the window:
+- **◉ Screenshot** saves the current frame (with its boxes) to `snapshots/`.
+  It works while the camera is on, and the status bar confirms each save.
+  The newest screenshot also appears at the bottom right of the sidebar under
+  a **Screenshot** title, with the time it was taken; click it to open it.
+- **⏪ Replay last 15s** plays the last 15 seconds in the main video area, at
+  their real speed, with a red "REPLAY 0:05 / 0:15" tag. It loops until you
+  press the big green **▶ CONTINUE LIVE** button that appears in the sidebar
+  under "Show log" (or `C`).
+  Detection keeps running in the background during a replay. Replay still works
+  after STOP and starts fresh on the next START. It keeps only the frames the
+  detector processed, so on a slow PC (low FPS) it will look choppy.
+
+The settings sit in a row in the top bar, under the logo: **What to look for**,
+**Camera** with **⟳ Find cameras**, and **How sure before it alerts**.
+
+The sidebar has these parts, from the top:
+- **Light + How sure:** a small light that blinks red while a gas cylinder is
+  spotted, next to how sure the detector is (for example 87 %). Grey means
+  nothing is spotted or the camera is off.
+- **Camera on / off:** START and STOP. The button you can press next is lit
+  and the other is dark: while the camera is on, STOP is neon red; while it is
+  off, START is neon green.
+- **Show log:** hidden until clicked. Lists sightings, photos, detector and
+  camera changes, and problems.
+
+If something goes wrong (camera won't open, detector won't load or download),
+the video area says what happened and what to do next in plain words.
 
 ## How detection works
 
@@ -99,10 +141,13 @@ The sidebar shows:
   detection never works on old, buffered video.
 - Each frame goes through the model. A cylinder counts only after it has been
   seen in **5 frames in a row**, which filters out one-frame false alarms.
-- Confirmed cylinders get an orange box and confidence label, and the alert
-  banner and video border pulse.
-- If the model fails to load or the camera can't open, the app shows the error
-  and the reason in the log, and START works again.
+- A box that covers more than 90 % of the picture is ignored. The custom model
+  sometimes marks the whole frame (for example a plain ceiling) as a cylinder;
+  a real cylinder only fills the frame when held against the lens.
+- Confirmed cylinders get a green box and confidence label, and the alert
+  light and the video border blink.
+- If the model fails to load or the camera can't open, the video area explains
+  the problem, the log has the details, and START works again.
 
 ## Tests
 
@@ -113,3 +158,6 @@ The sidebar shows:
 ## Known issues
 
 - In the command-line preview, the window title shows `\u2014` instead of a dash.
+- The Camera dropdown shows camera numbers, not device names: OpenCV can't read
+  names, and listing them would need an extra package. Up to 6 cameras (0–5)
+  are checked.

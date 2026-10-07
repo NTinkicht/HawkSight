@@ -11,6 +11,7 @@ import numpy as np
 
 import hawksight_app
 from hawksight_app import HawkSightApp
+from src.core import DetectionResult
 
 
 def _pump_until(app, condition, timeout=5.0):
@@ -23,13 +24,40 @@ def _pump_until(app, condition, timeout=5.0):
     return False
 
 
+class FakeVideo:
+    """Stands in for VideoSource: a camera that always delivers a frame."""
+    opened = []
+
+    def __init__(self, source):
+        self.source   = source
+        self.released = False
+
+    def open(self):
+        FakeVideo.opened.append(self)
+        return True
+
+    def read(self):
+        time.sleep(0.01)
+        return None if self.released else np.zeros((20, 20, 3), np.uint8)
+
+    def release(self):
+        self.released = True
+
+
 class AppTestCase(unittest.TestCase):
+    CAMERAS = [0]   # what the camera scan finds; no real webcam is touched
+
     def setUp(self):
+        patcher = mock.patch.object(hawksight_app, "list_cameras",
+                                    lambda assume_present=(): list(self.CAMERAS))
+        patcher.start()
+        self.addCleanup(patcher.stop)
         try:
             self.app = HawkSightApp()
         except tk.TclError as exc:
             self.skipTest(f"Tk unavailable: {exc}")
-        self.app.update()
+        self.assertTrue(_pump_until(self.app, lambda: not self.app._scanning),
+                        "camera scan never finished")
 
     def tearDown(self):
         self.app.on_close()
@@ -40,7 +68,7 @@ class AppTestCase(unittest.TestCase):
 
 class StartupTest(AppTestCase):
     def test_window_starts_idle(self):
-        self.assertEqual(self.app._sv_status.get(), "Idle")
+        self.assertEqual(self.app._sv_status.get(), "Ready")
         self.assertEqual(str(self.app._btn_start["state"]), tk.NORMAL)
 
 
@@ -55,10 +83,381 @@ class ModelLoadFailureTest(AppTestCase):
             self.app, lambda: str(self.app._btn_start["state"]) == tk.NORMAL)
 
         self.assertTrue(recovered, "START button stayed disabled")
-        self.assertEqual(str(self.app._btn_model_yolo["state"]), tk.NORMAL)
-        self.assertEqual(self.app._sv_status.get(), "Model error")
+        self.assertEqual(str(self.app._cmb_model["state"]), "readonly")
+        self.assertEqual(self.app._sv_status.get(), "Detector problem")
         self.assertIn("weights file is corrupt", self.log_text())
         self.assertFalse(self.app._controller.is_running)
+
+
+class StockModelTest(AppTestCase):
+    """YOLOv8n stays selectable when yolov8n.pt hasn't been downloaded yet."""
+
+    def setUp(self):
+        super().setUp()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.missing = Path(tmp.name) / "yolov8n.pt"
+        paths = dict(hawksight_app.MODEL_PATHS, yolo=self.missing)
+        patcher = mock.patch.object(hawksight_app, "MODEL_PATHS", paths)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.app._model_key = "custom"
+
+    def test_yolo_can_be_chosen_before_it_is_downloaded(self):
+        self.app._on_model_switch("yolo")
+        self.assertEqual(self.app._model_key, "yolo")
+        self.assertEqual(self.app._model._model_path, str(self.missing))
+
+    def test_failed_download_says_so(self):
+        self.app._on_model_switch("yolo")
+
+        def offline_load():
+            raise ConnectionError("no internet")
+        self.app._model.load = offline_load
+
+        self.app._on_start()
+        self.assertIn("downloading", self.app._sv_status.get().lower())
+        recovered = _pump_until(
+            self.app, lambda: str(self.app._btn_start["state"]) == tk.NORMAL)
+
+        self.assertTrue(recovered, "START button stayed disabled")
+        self.assertIn("Could not download yolov8n.pt", self.log_text())
+        self.assertIn("internet connection", self.log_text())
+
+
+class ModelDropdownTest(AppTestCase):
+    def choose(self, label):
+        self.app._sv_model.set(label)
+        self.app._cmb_model.event_generate("<<ComboboxSelected>>")
+        self.app.update()
+
+    def test_dropdown_lists_every_available_model(self):
+        self.assertEqual(
+            list(self.app._cmb_model["values"]),
+            [hawksight_app.MODEL_LABELS[k]
+             for k in hawksight_app.available_model_keys()])
+        self.assertIn(hawksight_app.MODEL_LABELS["yolo"],
+                      self.app._cmb_model["values"])
+
+    def test_choosing_a_model_switches_to_it(self):
+        self.app._on_model_switch("custom")
+        self.choose(hawksight_app.MODEL_LABELS["yolo"])
+        self.assertEqual(self.app._model_key, "yolo")
+        self.assertEqual(self.app._model._model_path,
+                         str(hawksight_app.MODEL_PATHS["yolo"]))
+        self.assertIn("model switched", self.log_text())
+
+    def test_custom_model_is_hidden_when_its_file_is_missing(self):
+        paths = dict(hawksight_app.MODEL_PATHS,
+                     custom=Path("does_not_exist.pt"))
+        with mock.patch.object(hawksight_app, "MODEL_PATHS", paths):
+            self.assertEqual(hawksight_app.available_model_keys(), ["yolo"])
+
+    def test_dropdown_is_locked_while_starting(self):
+        def broken_load():
+            raise RuntimeError("no model in tests")
+        self.app._model.load = broken_load
+        self.app._on_start()
+        self.assertEqual(str(self.app._cmb_model["state"]), tk.DISABLED)
+        _pump_until(self.app,
+                    lambda: str(self.app._btn_start["state"]) == tk.NORMAL)
+        self.assertEqual(str(self.app._cmb_model["state"]), "readonly")
+
+
+class CameraDropdownTest(AppTestCase):
+    CAMERAS = [0, 2]
+
+    def setUp(self):
+        super().setUp()
+        FakeVideo.opened = []
+        patcher = mock.patch.object(hawksight_app, "VideoSource", FakeVideo)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.app._model.load = lambda: None
+
+    def choose(self, label):
+        self.app._sv_camera.set(label)
+        self.app._cmb_camera.event_generate("<<ComboboxSelected>>")
+        self.app.update()
+
+    def start_and_wait(self):
+        self.app._on_start()
+        self.assertTrue(_pump_until(
+            self.app, lambda: self.app._sv_status.get() == "Watching"))
+
+    def test_dropdown_lists_connected_cameras(self):
+        self.assertEqual(list(self.app._cmb_camera["values"]),
+                         ["Camera 0 (laptop)", "Camera 2"])
+        self.assertEqual(self.app._sv_camera.get(), "Camera 0 (laptop)")
+        self.assertEqual(str(self.app._cmb_camera["state"]), "readonly")
+
+    def test_the_button_to_press_next_is_lit_and_steady(self):
+        app = self.app
+        lit_start, lit_stop = app.LIT["start"], app.LIT["stop"]
+        dark_start, dark_stop = app.DARK["start"][0], app.DARK["stop"][0]
+
+        def colours_over(seconds):
+            seen = set()
+            _pump_until(app, lambda: seen.add((app._btn_start["bg"],
+                                               app._btn_stop["bg"])) and False,
+                        timeout=seconds)
+            return seen
+
+        # Camera off (just opened): START lit, STOP dark, no animation.
+        self.assertEqual(colours_over(1.0), {(lit_start, dark_stop)})
+
+        self.start_and_wait()
+        self.assertEqual(colours_over(1.0), {(dark_start, lit_stop)})
+
+        app._on_stop()
+        self.assertEqual(colours_over(1.0), {(lit_start, dark_stop)})
+
+    def test_start_uses_the_chosen_camera(self):
+        self.choose("Camera 2")
+        self.start_and_wait()
+        self.assertEqual([v.source for v in FakeVideo.opened], [2])
+
+    def test_switching_while_live_stops_old_feed_and_starts_new(self):
+        self.start_and_wait()
+        old = FakeVideo.opened[-1]
+        self.choose("Camera 2")
+        self.assertTrue(old.released, "old camera was not released")
+        self.start_and_wait()
+        new = FakeVideo.opened[-1]
+        self.assertEqual(new.source, 2)
+        self.assertFalse(new.released)
+        self.assertTrue(self.app._controller.is_running)
+        self.assertIn("camera switched", self.log_text())
+
+    def test_rescan_picks_up_new_camera_and_keeps_selection(self):
+        self.choose("Camera 2")
+        self.CAMERAS = [0, 1, 2]
+        self.app._btn_rescan.invoke()
+        _pump_until(self.app, lambda: not self.app._scanning)
+        self.assertEqual(list(self.app._cmb_camera["values"]),
+                         ["Camera 0 (laptop)", "Camera 1", "Camera 2"])
+        self.assertEqual(self.app._sv_camera.get(), "Camera 2")
+
+    def test_no_camera_found_falls_back_to_laptop_camera(self):
+        self.choose("Camera 2")
+        self.CAMERAS = []
+        self.app._btn_rescan.invoke()
+        _pump_until(self.app, lambda: not self.app._scanning)
+        self.assertEqual(self.app._sv_camera.get(), "Camera 0 (laptop)")
+        self.assertIn("using the laptop camera", self.log_text())
+        self.start_and_wait()
+        self.assertEqual([v.source for v in FakeVideo.opened], [0])
+
+    def test_no_camera_at_all_says_so_plainly(self):
+        class Unopenable(FakeVideo):
+            def open(self):
+                return False
+        self.CAMERAS = []
+        self.app._btn_rescan.invoke()
+        _pump_until(self.app, lambda: not self.app._scanning)
+        with mock.patch.object(hawksight_app, "VideoSource", Unopenable):
+            self.app._on_start()
+            _pump_until(self.app,
+                        lambda: self.app._sv_status.get() == "No camera found")
+        canvas_text = " ".join(
+            self.app._canvas.itemcget(i, "text")
+            for i in self.app._canvas.find_all()
+            if self.app._canvas.type(i) == "text")
+        self.assertIn("No camera found", canvas_text)
+        self.assertIn("Find cameras", canvas_text)
+        self.assertNotIn("Teams", canvas_text)
+
+    def test_camera_that_will_not_open_explains_what_to_check(self):
+        class Unopenable(FakeVideo):
+            def open(self):
+                return False
+        with mock.patch.object(hawksight_app, "VideoSource", Unopenable):
+            self.app._on_start()
+            _pump_until(self.app,
+                        lambda: self.app._sv_status.get() == "Camera problem")
+        self.assertIn("Could not open Camera 0 (laptop)", self.log_text())
+        self.assertIn("Privacy", self.log_text())
+        self.assertEqual(str(self.app._btn_start["state"]), tk.NORMAL)
+
+
+class EasyUiTest(AppTestCase):
+
+    def test_log_is_hidden_until_show_log_is_clicked(self):
+        self.assertFalse(self.app.log_visible)
+        self.app._btn_log.invoke()
+        self.app.update()
+        self.assertTrue(self.app.log_visible)
+        self.assertIn("Hide log", self.app._btn_log["text"])
+        self.app._btn_log.invoke()
+        self.app.update()
+        self.assertFalse(self.app.log_visible)
+
+    def test_light_is_off_until_a_cylinder_is_spotted(self):
+        self.assertEqual(self.app.light_color, self.app.LIGHT_OFF)
+        self.assertEqual(self.app._sv_best.get(), "—")
+
+        hit = DetectionResult(boxes=[(1, 1, 5, 5)], labels=["Gas Cylinder"],
+                              confidences=[0.87])
+        self.app._update_stats(hit)
+        self.app.update()
+        self.assertIn(self.app.light_color,
+                      (self.app.LIGHT_ON, self.app.LIGHT_DIM))
+        self.assertEqual(self.app._sv_best.get(), "87%")
+
+        self.app._update_stats(DetectionResult())
+        self.assertEqual(self.app.light_color, self.app.LIGHT_OFF)
+        self.assertEqual(self.app._sv_best.get(), "—")
+
+    def test_counters_are_gone(self):
+        for name in ("_sv_objects", "_sv_runtime", "_sv_total", "_alert_lbl"):
+            self.assertFalse(hasattr(self.app, name), name)
+
+    def test_camera_problem_is_shown_on_the_video_area(self):
+        class Unopenable(FakeVideo):
+            def open(self):
+                return False
+        self.app._model.load = lambda: None
+        with mock.patch.object(hawksight_app, "VideoSource", Unopenable):
+            self.app._on_start()
+            _pump_until(self.app,
+                        lambda: self.app._sv_status.get() == "Camera problem")
+        canvas_text = " ".join(
+            self.app._canvas.itemcget(i, "text")
+            for i in self.app._canvas.find_all()
+            if self.app._canvas.type(i) == "text")
+        self.assertIn("Camera problem", canvas_text)
+        self.assertIn("press START again", canvas_text)
+
+
+class PhotoKeyTest(AppTestCase):
+    def setUp(self):
+        super().setUp()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.snap_dir = Path(tmp.name)
+        patcher = mock.patch.object(hawksight_app, "SNAP_DIR", self.snap_dir)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        patcher = mock.patch.object(hawksight_app, "VideoSource", FakeVideo)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.app._model.load = lambda: None
+
+    def test_p_takes_a_photo_while_the_camera_is_on(self):
+        self.app._on_start()
+        self.assertTrue(_pump_until(
+            self.app, lambda: self.app._last_frame is not None))
+        self.app.focus_force()
+        self.app.update()
+        self.app.event_generate("<KeyPress-p>")
+        self.app.update()
+        self.assertEqual(len(list(self.snap_dir.glob("*.jpg"))), 1)
+        self.assertIn("Screenshot saved", self.app._sv_status.get())
+
+
+class HeaderButtonsTest(AppTestCase):
+    def setUp(self):
+        super().setUp()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.snap_dir = Path(tmp.name)
+        for name, value in (("SNAP_DIR", self.snap_dir),
+                            ("VideoSource", FakeVideo)):
+            patcher = mock.patch.object(hawksight_app, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.app._model.load = lambda: None
+
+    def start_and_wait_for_frames(self, n=5):
+        self.app._on_start()
+        self.assertTrue(_pump_until(self.app, lambda: len(self.app._replay) >= n))
+
+    def test_both_buttons_are_off_before_start(self):
+        self.assertFalse(self.app._btn_shot.enabled)
+        self.assertFalse(self.app._btn_replay.enabled)
+        self.app._btn_shot.invoke()
+        self.app._btn_replay.invoke()
+        self.assertEqual(list(self.snap_dir.iterdir()), [])
+        self.assertFalse(self.app.replaying)
+        self.assertEqual(self.app._btn_continue.winfo_manager(), "")
+
+    def test_screenshot_shows_in_the_sidebar_and_opens_on_click(self):
+        self.start_and_wait_for_frames(1)
+        self.assertIsNone(self.app._shot_path)
+        self.app._btn_shot.invoke()
+        self.app.update()
+        saved, = self.snap_dir.glob("*.jpg")
+        self.assertEqual(self.app._shot_path, saved)
+        self.assertTrue(self.app._lbl_shot.winfo_ismapped())
+        self.assertEqual(self.app._shot_photo.width(),
+                         self.app.SIDEBAR_W - 2 * self.app.S3 - 4)
+        with mock.patch.object(hawksight_app.os, "startfile", create=True) as op:
+            self.app._lbl_shot.event_generate("<Button-1>")
+            self.app.update()
+        op.assert_called_once_with(saved)
+
+    def test_screenshot_button_saves_while_camera_is_on(self):
+        self.start_and_wait_for_frames(1)
+        self.assertTrue(self.app._btn_shot.enabled)
+        self.app._btn_shot.invoke()
+        self.assertEqual(len(list(self.snap_dir.glob("*.jpg"))), 1)
+        self.app._on_stop()
+        self.assertFalse(self.app._btn_shot.enabled)
+
+    def test_replay_plays_in_the_feed_until_continue(self):
+        self.start_and_wait_for_frames(5)
+        self.app._btn_replay.invoke()
+        self.assertTrue(self.app.replaying)
+        self.assertEqual(self.app._btn_continue.winfo_manager(), "pack")
+
+        # Live frames are still detected and recorded, but not drawn.
+        with mock.patch.object(self.app._display, "render") as render:
+            before = len(self.app._replay)
+            _pump_until(self.app, lambda: len(self.app._replay) > before + 3)
+            drawn = [c.args[0] for c in render.call_args_list]
+        self.assertTrue(drawn, "replay drew nothing")
+        for frame in drawn:   # every drawn frame carries the REPLAY tag
+            self.assertGreater(int(frame[:, :, 2].max()), 150)
+
+        # It loops instead of ending on its own.
+        _pump_until(self.app, lambda: False, timeout=1.5)
+        self.assertTrue(self.app.replaying)
+
+        self.app._btn_continue.invoke()
+        self.assertFalse(self.app.replaying)
+        self.assertEqual(self.app._btn_continue.winfo_manager(), "")
+        self.assertTrue(self.app._controller.is_running)
+
+    def test_continue_after_stop_shows_the_stopped_screen(self):
+        self.start_and_wait_for_frames(3)
+        self.app._btn_replay.invoke()
+        self.app._on_stop()
+        self.assertTrue(self.app.replaying, "STOP should not end the replay")
+        self.app._btn_continue.invoke()
+        canvas_text = " ".join(
+            self.app._canvas.itemcget(i, "text")
+            for i in self.app._canvas.find_all()
+            if self.app._canvas.type(i) == "text")
+        self.assertIn("Stopped", canvas_text)
+
+    def test_replay_still_works_after_stop_and_resets_on_next_start(self):
+        self.start_and_wait_for_frames(3)
+        self.app._on_stop()
+        self.assertTrue(self.app._btn_replay.enabled)
+        self.app._on_start()
+        _pump_until(self.app, lambda: self.app._sv_status.get() == "Watching")
+        self.assertLessEqual(len(self.app._replay), 2)
+
+    def test_r_replays_and_c_continues(self):
+        self.start_and_wait_for_frames(3)
+        self.app.focus_force()
+        self.app.update()
+        self.app.event_generate("<KeyPress-r>")
+        self.app.update()
+        self.assertTrue(self.app.replaying)
+        self.app.event_generate("<KeyPress-c>")
+        self.app.update()
+        self.assertFalse(self.app.replaying)
 
 
 class SnapshotTest(AppTestCase):
@@ -93,9 +492,9 @@ class KeyboardShortcutTest(AppTestCase):
 
     def test_stop_key_does_nothing_while_stop_is_disabled(self):
         self.press("x")
-        self.assertEqual(self.app._sv_status.get(), "Idle")
+        self.assertEqual(self.app._sv_status.get(), "Ready")
 
-    def test_snapshot_key_does_nothing_while_snapshot_is_disabled(self):
+    def test_photo_key_does_nothing_while_camera_is_off(self):
         self.app._last_frame = np.zeros((10, 10, 3), dtype=np.uint8)
         with tempfile.TemporaryDirectory() as tmp, \
                 mock.patch.object(hawksight_app, "SNAP_DIR", Path(tmp)), \
@@ -109,7 +508,7 @@ class KeyboardShortcutTest(AppTestCase):
             raise RuntimeError("no model in tests")
         self.app._model.load = broken_load
         self.press("S")
-        self.assertNotEqual(self.app._sv_status.get(), "Idle")
+        self.assertNotEqual(self.app._sv_status.get(), "Ready")
         _pump_until(self.app,
                     lambda: str(self.app._btn_start["state"]) == tk.NORMAL)
 

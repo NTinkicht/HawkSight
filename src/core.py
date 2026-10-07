@@ -7,6 +7,7 @@ import sys
 import threading
 import time
 from collections import deque
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Union
@@ -23,6 +24,46 @@ CUSTOM_PT  = ROOT / "hawksight_custom.pt"
 # Prefer the purpose-trained model when it is present.
 DEFAULT_MODEL = CUSTOM_PT if CUSTOM_PT.exists() else YOLO_PT
 DEFAULT_CONF  = 0.65
+MAX_CAMERAS   = 6      # camera indices 0..5 are checked when scanning
+
+
+def _camera_backend() -> int:
+    # On Windows, OpenCV's default camera driver (Media Foundation) takes
+    # 16-21 s to open on the dev webcam; DirectShow takes 3-4 s.
+    return cv2.CAP_DSHOW if sys.platform == "win32" else cv2.CAP_ANY
+
+
+def list_cameras(max_index: int = MAX_CAMERAS,
+                 assume_present: tuple = ()) -> list[int]:
+    """Indices of the cameras that can be opened. OpenCV has no way to list
+    devices, so each index is tried in turn. A camera that is already in use
+    may refuse a second open, so indices in `assume_present` (e.g. the live
+    feed) are listed without being opened. Slow: call off the UI thread."""
+    found = []
+    with _quiet_opencv():
+        for i in range(max_index):
+            if i in assume_present:
+                found.append(i)
+                continue
+            cap = cv2.VideoCapture(i, _camera_backend())
+            try:
+                if cap.isOpened():
+                    found.append(i)
+            finally:
+                cap.release()
+    return found
+
+
+@contextmanager
+def _quiet_opencv():
+    # A camera index that can't be opened makes OpenCV print a warning to the
+    # console. The app reports camera problems itself, so hide them.
+    log_level = cv2.utils.logging.getLogLevel()
+    cv2.utils.logging.setLogLevel(cv2.utils.logging.LOG_LEVEL_ERROR)
+    try:
+        yield
+    finally:
+        cv2.utils.logging.setLogLevel(log_level)
 
 
 # ─── Data ────────────────────────────────────────────────────────────────────
@@ -63,13 +104,20 @@ class VideoSource:
 
     def open(self) -> bool:
         is_camera = isinstance(self._source, int)
-        # On Windows, OpenCV's default camera driver (Media Foundation) takes
-        # 16-21 s to open on the dev webcam; DirectShow takes 3-4 s.
-        backend = (cv2.CAP_DSHOW if is_camera and sys.platform == "win32"
-                   else cv2.CAP_ANY)
-        self._cap = cv2.VideoCapture(self._source, backend)
-        if not self._cap.isOpened():
-            return False
+        # Some laptop cameras only work through Media Foundation, so on
+        # Windows try it when DirectShow can't open the camera (slower start).
+        backends  = [_camera_backend()] if is_camera else [cv2.CAP_ANY]
+        if is_camera and backends[0] == cv2.CAP_DSHOW:
+            backends.append(cv2.CAP_MSMF)
+        with _quiet_opencv():
+            for backend in backends:
+                self._cap = cv2.VideoCapture(self._source, backend)
+                if self._cap.isOpened():
+                    break
+                self._cap.release()
+            else:
+                self._cap = None
+                return False
         self._cap.set(cv2.CAP_PROP_FRAME_WIDTH,  1280)
         self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
         if is_camera:
@@ -114,6 +162,10 @@ class VideoSource:
             self._cap.release()
             self._cap = None
 
+    @property
+    def source(self) -> Union[int, str]:
+        return self._source
+
     def is_open(self) -> bool:
         return self._cap is not None and self._cap.isOpened()
 
@@ -126,6 +178,10 @@ class DetectionModel:
     # (hawksight_custom.pt) has a single gas_cylinder class, so every
     # detection from it is accepted.
     PROXY_CLASSES = {"bottle"}
+    # A box covering almost the whole picture is a known false alarm of the
+    # custom model (it has flagged a plain ceiling at 72-75 %). A real
+    # cylinder only fills the frame when held against the lens.
+    MAX_BOX_FRACTION = 0.9
 
     def __init__(self, model_path: Union[str, Path] = "yolov8n.pt",
                  conf: float = 0.4):
@@ -167,6 +223,7 @@ class DetectionModel:
         if self._model is None:
             return DetectionResult()
         results = self._model.predict(frame, conf=self._conf, verbose=False)[0]
+        frame_area = frame.shape[0] * frame.shape[1]
         boxes, labels, confs = [], [], []
         for box in results.boxes:
             cls_id = int(box.cls[0])
@@ -174,6 +231,8 @@ class DetectionModel:
             if not self._custom and label not in self.PROXY_CLASSES:
                 continue
             x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+            if (x2 - x1) * (y2 - y1) > self.MAX_BOX_FRACTION * frame_area:
+                continue
             conf = float(box.conf[0])
             boxes.append((x1, y1, x2, y2))
             labels.append("Gas Cylinder")
@@ -184,8 +243,8 @@ class DetectionModel:
 # ─── FrameProcessor ──────────────────────────────────────────────────────────
 
 class FrameProcessor:
-    BOX_COLOR = (0, 140, 255)   # BGR orange
-    TEXT_BG   = (0, 80,  180)
+    BOX_COLOR = (0, 220, 0)     # BGR green, bright enough to stand out
+    TEXT_BG   = (0, 130, 0)     # darker green so the white label text reads
     FONT      = cv2.FONT_HERSHEY_SIMPLEX
 
     def annotate(self, frame: np.ndarray, result: DetectionResult) -> np.ndarray:
@@ -212,6 +271,52 @@ class FrameProcessor:
         x_off   = (target_w - nw) // 2
         canvas[y_off:y_off + nh, x_off:x_off + nw] = resized
         return canvas
+
+
+# ─── ReplayBuffer ────────────────────────────────────────────────────────────
+
+class ReplayBuffer:
+    """The last `seconds` of frames, for the "Replay" button. Frames are
+    stored as JPEGs at most MAX_WIDTH wide: 15 s of raw 720p video at 30 fps
+    would take over 1 GB, compressed it is a few MB."""
+    MAX_WIDTH = 960
+
+    def __init__(self, seconds: float = 15.0, quality: int = 80):
+        self.seconds  = seconds
+        self._quality = quality
+        self._items: deque = deque()   # (timestamp, jpeg bytes)
+
+    def add(self, frame: np.ndarray, t: Optional[float] = None):
+        t = time.monotonic() if t is None else t
+        h, w = frame.shape[:2]
+        if w > self.MAX_WIDTH:
+            frame = cv2.resize(frame, (self.MAX_WIDTH, h * self.MAX_WIDTH // w),
+                               interpolation=cv2.INTER_AREA)
+        ok, jpg = cv2.imencode(".jpg", frame,
+                               [cv2.IMWRITE_JPEG_QUALITY, self._quality])
+        if not ok:
+            return
+        self._items.append((t, jpg))
+        while t - self._items[0][0] > self.seconds:
+            self._items.popleft()
+
+    def clear(self):
+        self._items.clear()
+
+    def __len__(self) -> int:
+        return len(self._items)
+
+    @property
+    def duration(self) -> float:
+        return self._items[-1][0] - self._items[0][0] if self._items else 0.0
+
+    def frames(self) -> list:
+        """[(seconds since the first frame, BGR frame), ...] oldest first."""
+        if not self._items:
+            return []
+        t0 = self._items[0][0]
+        return [(t - t0, cv2.imdecode(jpg, cv2.IMREAD_COLOR))
+                for t, jpg in self._items]
 
 
 # ─── SystemController ────────────────────────────────────────────────────────
